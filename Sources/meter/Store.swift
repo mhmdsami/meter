@@ -22,8 +22,7 @@ final class Store: ObservableObject {
         let id: String
         let label: String
         let total: String
-        let breakdown: String
-        /// daily values, oldest first, normalized to the row's max for the sparkline
+        /// daily values, oldest first, normalized to the row's max for the bar chart
         let spark: [Double]
     }
 
@@ -34,31 +33,22 @@ final class Store: ObservableObject {
         return f
     }()
 
-    /// "Last 7/30 days" lines with a per-provider breakdown, from the same
-    /// device-wide scans that feed today's spend.
+    /// "Last 7/30 days" totals with per-day bars, from the same device-wide
+    /// scans that feed today's spend.
     nonisolated static func historyLines(_ daily: [String: [Double]]) -> [HistoryLine] {
-        let names = ["codex": "Codex", "claude": "Claude", "opencode": "OpenCode", "vercel": "Vercel"]
         func sum(_ d: [Double], _ n: Int) -> Double { d.prefix(n).reduce(0, +) }
         var lines: [HistoryLine] = []
         for (id, label, n) in [("7d", "Last 7 days", 7), ("30d", "Last 30 days", 30)] {
             let total = daily.reduce(0.0) { $0 + sum($1.value, n) }
             guard total > 0.004 else { continue }
-            let parts = daily.compactMap { type, d -> String? in
-                guard sum(d, n) > 0.004, let name = names[type] else { return nil }
-                return name + " " + Self.dollars.string(from: NSNumber(value: sum(d, n)))!
-            }.sorted()
-            // sparkline shows the 7-day shape on the 7d row; oldest day first,
-            // normalized against the max day total
-            var spark: [Double] = []
-            let weekTotals = (0..<7).map { i in
+            // per-day sums, oldest first, normalized against the max day
+            let daySums = (0..<n).map { i in
                 daily.values.reduce(0.0) { $0 + ($1.count > i ? $1[i] : 0) }
             }
-            if let weekMax = weekTotals.max(), weekMax > 0 {
-                spark = weekTotals.reversed().map { $0 / weekMax }
-            }
+            let max = daySums.max() ?? 0
+            let spark = max > 0 ? daySums.reversed().map { $0 / max } : []
             lines.append(HistoryLine(id: id, label: label,
                                      total: Self.dollars.string(from: NSNumber(value: total))!,
-                                     breakdown: parts.joined(separator: " · "),
                                      spark: spark))
         }
         return lines

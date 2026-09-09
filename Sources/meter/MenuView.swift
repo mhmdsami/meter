@@ -18,27 +18,21 @@ struct MenuContent: View {
                 Divider()
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(store.history) { line in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(alignment: .firstTextBaseline) {
                                 Text(line.label).font(.caption).foregroundStyle(.secondary)
-                                if !line.spark.isEmpty {
-                                    HStack(alignment: .bottom, spacing: 1) {
-                                        ForEach(line.spark.indices, id: \.self) { i in
-                                            RoundedRectangle(cornerRadius: 0.5)
-                                                .fill(Color.primary.opacity(0.3))
-                                                .frame(width: 3, height: max(1.5, line.spark[i] * 8))
-                                        }
-                                    }
-                                    .frame(height: 8, alignment: .bottom)
-                                }
                                 Spacer()
                                 Text(line.total).font(.caption).monospacedDigit()
                             }
-                            if !line.breakdown.isEmpty {
-                                Text(line.breakdown)
-                                    .font(.caption2).foregroundStyle(.secondary)
-                                    .lineLimit(1).truncationMode(.tail)
+                            HStack(alignment: .bottom, spacing: 2) {
+                                ForEach(line.spark.indices, id: \.self) { i in
+                                    RoundedRectangle(cornerRadius: 1)
+                                        .fill(Color.primary.opacity(0.3))
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: max(2, line.spark[i] * 22))
+                                }
                             }
+                            .frame(height: 22, alignment: .bottom)
                         }
                     }
                 }

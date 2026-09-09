@@ -83,17 +83,14 @@ final class ProviderParsingTests: XCTestCase {
         XCTAssertEqual(lines[0].id, "7d")
         // 7d: claude 1..7 = 28, codex 2+4+1 = 7
         XCTAssertEqual(lines[0].total, "$35.00")
-        XCTAssertTrue(lines[0].breakdown.contains("Claude $28.00"))
-        XCTAssertTrue(lines[0].breakdown.contains("Codex $7.00"))
-        // spark oldest-first: totals 8,6,5,4,7,2,3 — max 8 at index 0
+        // per-day bars, oldest first: totals 8,6,5,4,7,2,3 — max 8 at index 0
         XCTAssertEqual(lines[0].spark.count, 7)
         XCTAssertEqual(lines[0].spark.first ?? 0, 1.0, accuracy: 0.0001)
         XCTAssertEqual(lines[0].spark.last ?? 0, 3.0 / 8.0, accuracy: 0.0001)
         // 30d totals
         XCTAssertEqual(lines[1].id, "30d")
-        XCTAssertEqual(lines[1].breakdown.contains("Codex $7.00"), true)
-        XCTAssertEqual(lines[1].breakdown.contains("Claude $465.00"), true)
         XCTAssertEqual(lines[1].total, "$472.00")
+        XCTAssertEqual(lines[1].spark.count, 30)
     }
 
     func testHistoryLinesSkipsEmpty() {
