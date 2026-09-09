@@ -63,24 +63,36 @@ enum Providers {
     /// one instance of its type, resolved by `LocalCostSource.target`.
     struct LocalCostSource {
         let type: String
-        let scan: @Sendable (Pricing, Date) -> Double
+        let buckets: @Sendable (Pricing, Date) -> [Date: Double]
         /// Which enabled instance owns the device-wide total. Codex, Claude and
         /// Vercel hold a single device-wide credential, so first enabled is the
         /// only correct answer; opencode matches the actively billed key.
         let target: @Sendable ([ProviderInstance]) -> ProviderInstance?
 
-        static func firstEnabled(_ type: String,
-                                 _ scan: @escaping @Sendable (Pricing, Date) -> Double) -> LocalCostSource {
-            .init(type: type, scan: scan,
+        static func firstEnabled(
+            _ type: String,
+            _ buckets: @escaping @Sendable (Pricing, Date) -> [Date: Double]
+        ) -> LocalCostSource {
+            .init(type: type, buckets: buckets,
                   target: { enabled in enabled.first { $0.type == type } })
         }
 
         static let all: [LocalCostSource] = [
-            .firstEnabled("codex") { CostScan.codexToday(pricing: $0, since: $1) },
-            .firstEnabled("claude") { CostScan.claudeToday(pricing: $0, since: $1) },
-            .firstEnabled("vercel") { CostScan.vercelToday(pricing: $0, since: $1) },
+            .firstEnabled("codex") { pricing, windowStart in
+                CostScan.buckets(urls: CostScan.codexURLs(windowStart: windowStart),
+                                 format: .codex, windowStart: windowStart, pricing: pricing)
+            },
+            .firstEnabled("claude") { pricing, windowStart in
+                CostScan.buckets(urls: CostScan.claudeURLs(),
+                                 format: .claude, windowStart: windowStart, pricing: pricing)
+            },
+            .firstEnabled("vercel") { pricing, windowStart in
+                CostScan.buckets(urls: [FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(".fx/usage.jsonl")],
+                    format: .vercel, windowStart: windowStart, pricing: pricing)
+            },
             .init(type: "opencode",
-                  scan: { CostScan.opencodeToday(pricing: $0, since: $1) },
+                  buckets: { _, windowStart in CostScan.opencodeBuckets(windowStart: windowStart) },
                   target: { enabled in
                       let activeKey = OpenCode.activeAccountKey()
                       return enabled.first { inst in
@@ -92,21 +104,17 @@ enum Providers {
         ]
     }
 
-    /// Attaches device-wide scans to the merged reading list — callers must pass
-    /// every enabled instance and every reading (fresh or stale), or stale
-    /// spendToday values survive the rotation of an actively billed key.
-    static func attachLocalCosts(_ readings: [InstanceReading], enabled: [ProviderInstance]) async -> [InstanceReading] {
-        let types = Set(enabled.map(\.type))
-        let sources = LocalCostSource.all.filter { types.contains($0.type) }
-        guard !sources.isEmpty else { return hideEmpty(readings) }
-
-        let pricing = await Pricing.load()
+    /// Attaches today's device-wide totals (precomputed by `CostScan.dailyTotals`)
+    /// to the merged reading list — callers must pass every enabled instance and
+    /// every reading (fresh or stale), or stale spendToday values survive the
+    /// rotation of an actively billed key.
+    static func attachLocalCosts(_ readings: [InstanceReading], enabled: [ProviderInstance],
+                                 today: [String: Double]) -> [InstanceReading] {
         var out = readings
-        for source in sources {
-            let (name, value) = await Task.detached {
-                (source.target(enabled)?.name, source.scan(pricing, CostScan.startOfToday))
-            }.value
-            if let name, let idx = out.firstIndex(where: { $0.name == name }) {
+        for source in LocalCostSource.all {
+            guard let name = source.target(enabled)?.name,
+                  let value = today[source.type] else { continue }
+            if let idx = out.firstIndex(where: { $0.name == name }) {
                 out[idx].spendToday = value
             }
         }

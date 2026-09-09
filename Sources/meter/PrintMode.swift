@@ -4,8 +4,12 @@ enum PrintMode {
     static func runAndExit() -> Never {
         Task.detached {
             let config = ConfigStore.load()
+            let types = Set(config.providers.filter(\.enabled).map(\.type))
+            let daily = await CostScan.dailyTotals(days: 1, types: types, pricing: await Pricing.load())
             var readings = await Providers.fetchAll(config.providers)
-            readings = await Providers.attachLocalCosts(readings, enabled: config.providers.filter(\.enabled))
+            readings = Providers.attachLocalCosts(
+                readings, enabled: config.providers.filter(\.enabled),
+                today: daily.mapValues { $0.first ?? 0 })
             print(render(config: config, readings: readings))
             exit(0)
         }

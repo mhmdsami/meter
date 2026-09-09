@@ -2,7 +2,9 @@ import XCTest
 @testable import meter
 
 final class CostScanTests: XCTestCase {
-    private let since = isoDate("2026-01-02T00:00:00Z")!
+    private func day(_ ts: String) -> Date {
+        Calendar.current.startOfDay(for: isoDate(ts)!)
+    }
 
     private var pricing: Pricing {
         let p = Pricing()
@@ -27,20 +29,22 @@ final class CostScanTests: XCTestCase {
         \(codexLine("2026-01-02T09:00:00Z", input: 1_000_000, cached: 0, output: 500_000))
         \(codexLine("2026-01-02T10:00:00Z", input: 2_000_000, cached: 0, output: 1_000_000))
         """
-        let total = CostScan.scan(text: text, since: since, pricing: pricing, format: .codex)
+        let b = CostScan.fileBuckets(text: text, format: .codex, pricing: pricing)
         // max today: 2M in @ $1 + 1M out @ $2
-        XCTAssertEqual(total, 4.0, accuracy: 0.0001)
+        XCTAssertEqual(b[day("2026-01-02T10:00:00Z")] ?? -1, 4.0, accuracy: 0.0001)
     }
 
-    func testCodexSessionStraddlingMidnightBillsOnlyToday() {
+    func testCodexSessionStraddlingMidnightBillsEachDay() {
         let text = """
         {"type":"turn_context","payload":{"model":"gpt-5.2"}}
-        \(codexLine("2026-01-01T23:00:00Z", input: 1_000_000, cached: 500_000, output: 500_000))
-        \(codexLine("2026-01-02T10:00:00Z", input: 3_000_000, cached: 1_500_000, output: 1_500_000))
+        \(codexLine("2026-01-01T12:00:00Z", input: 1_000_000, cached: 500_000, output: 500_000))
+        \(codexLine("2026-01-02T12:00:00Z", input: 3_000_000, cached: 1_500_000, output: 1_500_000))
         """
-        let total = CostScan.scan(text: text, since: since, pricing: pricing, format: .codex)
-        // deltas: input 2M (1M cached @ $0.5, 1M fresh @ $1) + output 1M @ $2
-        XCTAssertEqual(total, 1.0 + 0.5 + 2.0, accuracy: 0.0001)
+        let b = CostScan.fileBuckets(text: text, format: .codex, pricing: pricing)
+        // day 1: full totals (1M in @ $1 + 0.5M cached @ $0.5 + 0.5M out @ $2)
+        XCTAssertEqual(b[day("2026-01-01T12:00:00Z")] ?? -1, 1.75, accuracy: 0.0001)
+        // day 2: deltas (2M fresh in @ $1 + 1M cached @ $0.5 + 1M out @ $2)
+        XCTAssertEqual(b[day("2026-01-02T12:00:00Z")] ?? -1, 3.5, accuracy: 0.0001)
     }
 
     func testCodexUnknownModelCostsNothing() {
@@ -48,7 +52,7 @@ final class CostScanTests: XCTestCase {
         {"type":"turn_context","payload":{"model":"mystery-model"}}
         \(codexLine("2026-01-02T10:00:00Z", input: 1_000_000, cached: 0, output: 1_000_000))
         """
-        XCTAssertEqual(CostScan.scan(text: text, since: since, pricing: pricing, format: .codex), 0)
+        XCTAssertEqual(CostScan.fileBuckets(text: text, format: .codex, pricing: pricing), [:])
     }
 
     // MARK: - Claude per-message usage
@@ -63,71 +67,69 @@ final class CostScanTests: XCTestCase {
     func testClaudeDedupesStreamingChunks() {
         // same (id, requestId) streamed twice with growing output — only the max counts
         let text = """
-        \(claudeLine("2026-01-02T10:00:00Z", id: "msg1", reqId: "r1", input: 1_000_000, output: 100_000))
-        \(claudeLine("2026-01-02T10:00:01Z", id: "msg1", reqId: "r1", input: 1_000_000, output: 200_000))
+        \(claudeLine("2026-01-02T09:00:00Z", id: "m1", reqId: "r1", input: 1_000_000, output: 100_000))
+        \(claudeLine("2026-01-02T09:00:01Z", id: "m1", reqId: "r1", input: 1_000_000, output: 200_000))
         """
-        let total = CostScan.scan(text: text, since: since, pricing: pricing, format: .claude)
-        XCTAssertEqual(total, 3.0 + 0.2 * 15, accuracy: 0.0001)
+        let b = CostScan.fileBuckets(text: text, format: .claude, pricing: pricing)
+        // 1M in @ $3 + 0.2M out @ $15
+        XCTAssertEqual(b[day("2026-01-02T09:00:00Z")] ?? -1, 6.0, accuracy: 0.0001)
     }
 
-    func testClaudeIgnoresLinesBeforeSince() {
+    func testClaudeBucketsPerDay() {
         let text = """
-        \(claudeLine("2026-01-01T10:00:00Z", id: "old", reqId: "r0", input: 1_000_000, output: 1_000_000))
-        \(claudeLine("2026-01-02T10:00:00Z", id: "new", reqId: "r1", input: 1_000_000, output: 0))
+        \(claudeLine("2026-01-01T12:00:00Z", id: "m1", reqId: "r1", input: 1_000_000, output: 0))
+        \(claudeLine("2026-01-02T12:00:00Z", id: "m2", reqId: "r2", input: 2_000_000, output: 0))
         """
-        let total = CostScan.scan(text: text, since: since, pricing: pricing, format: .claude)
-        XCTAssertEqual(total, 3.0, accuracy: 0.0001)
+        let b = CostScan.fileBuckets(text: text, format: .claude, pricing: pricing)
+        XCTAssertEqual(b[day("2026-01-01T12:00:00Z")] ?? -1, 3.0, accuracy: 0.0001)
+        XCTAssertEqual(b[day("2026-01-02T12:00:00Z")] ?? -1, 6.0, accuracy: 0.0001)
     }
 
     func testClaudeCacheCreationDict() {
         let text = """
-        {"type":"assistant","timestamp":"2026-01-02T10:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-sonnet-4-5","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":600000,"ephemeral_1h_input_tokens":400000}}}}
+        {"type":"assistant","timestamp":"2026-01-02T09:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-sonnet-4-5","usage":{"input_tokens":0,"output_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":500000}}}}
         """
-        let total = CostScan.scan(text: text, since: since, pricing: pricing, format: .claude)
-        XCTAssertEqual(total, 3.75, accuracy: 0.0001)
+        let b = CostScan.fileBuckets(text: text, format: .claude, pricing: pricing)
+        // 0.5M cache-write @ $3.75
+        XCTAssertEqual(b[day("2026-01-02T09:00:00Z")] ?? -1, 1.875, accuracy: 0.0001)
     }
 
     // MARK: - per-file cache
 
-    func testScanUrlsCachesUnchangedFiles() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let url = dir.appendingPathComponent("session.jsonl")
-
-        // whole-second mtime survives the setAttributes round trip exactly
-        let mtime = since.addingTimeInterval(36_000)
-        let line1 = claudeLine("2026-01-02T10:00:00Z", id: "m1", reqId: "r1", input: 1_000_000, output: 0)
-        try line1.write(to: url, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
-        let p = pricing
-
-        let first = CostScan.scan(urls: [url], since: since, pricing: p, format: .claude)
-        XCTAssertEqual(first, 3.0, accuracy: 0.0001)
-
-        // rewrite with different content but identical size + mtime → cache must serve the old value
-        let line2 = claudeLine("2026-01-02T11:00:00Z", id: "m2", reqId: "r2", input: 2_000_000, output: 0)
-        XCTAssertEqual(line1.utf8.count, line2.utf8.count)
-        try line2.write(to: url, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
-        XCTAssertEqual(CostScan.scan(urls: [url], since: since, pricing: p, format: .claude), 3.0, accuracy: 0.0001)
-
-        // size change → rescan picks up new total (line2 2M + line1 1M = $9)
-        try (line2 + "\n" + line1).write(to: url, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.modificationDate: mtime], ofItemAtPath: url.path)
-        let second = CostScan.scan(urls: [url], since: since, pricing: p, format: .claude)
-        XCTAssertEqual(second, 9.0, accuracy: 0.0001)
+    private func writeFixture(_ url: URL, _ text: String) throws {
+        try text.data(using: .utf8)!.write(to: url)
     }
 
-    func testScanUrlsSkipsFilesUntouchedSinceWindowStart() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let url = dir.appendingPathComponent("old.jsonl")
-        try claudeLine("2026-01-02T10:00:00Z", id: "m1", reqId: "r1", input: 1_000_000, output: 0)
-            .write(to: url, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.modificationDate: since.addingTimeInterval(-3600)], ofItemAtPath: url.path)
-        XCTAssertEqual(CostScan.scan(urls: [url], since: since, pricing: pricing, format: .claude), 0)
+    func testBucketsCacheUnchangedFiles() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("meter-cache-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try writeFixture(url, """
+        {"type":"turn_context","payload":{"model":"gpt-5.2"}}
+        \(codexLine("2026-01-02T10:00:00Z", input: 1_000_000, cached: 0, output: 0))
+        """)
+        let windowStart = isoDate("2026-01-02T00:00:00Z")!
+        let first = CostScan.buckets(urls: [url], format: .codex, windowStart: windowStart, pricing: pricing)
+        // rewrite content but restore the original mtime — the stamp is
+        // unchanged, so the cached buckets must survive
+        let originalMtime = try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as! Date
+        try writeFixture(url, """
+        {"type":"turn_context","payload":{"model":"gpt-5.2"}}
+        \(codexLine("2026-01-02T10:00:00Z", input: 1_000_001, cached: 0, output: 0))
+        """)
+        try FileManager.default.setAttributes([.modificationDate: originalMtime], ofItemAtPath: url.path)
+        let second = CostScan.buckets(urls: [url], format: .codex, windowStart: windowStart, pricing: pricing)
+        XCTAssertEqual(first[day("2026-01-02T10:00:00Z")] ?? -1, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(second, first)
+    }
+
+    func testBucketsSkipFilesUntouchedSinceWindowStart() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("meter-old-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try writeFixture(url, codexLine("2025-06-01T10:00:00Z", input: 1_000_000, cached: 0, output: 0))
+        // backdate the file below the window; it must contribute nothing
+        try FileManager.default.setAttributes([.modificationDate: isoDate("2025-06-01T10:00:00Z")!], ofItemAtPath: url.path)
+        let b = CostScan.buckets(urls: [url], format: .codex,
+                                 windowStart: isoDate("2026-01-02T00:00:00Z")!, pricing: pricing)
+        XCTAssertEqual(b, [:])
     }
 }

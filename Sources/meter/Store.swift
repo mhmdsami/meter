@@ -26,12 +26,18 @@ final class Store: ObservableObject {
         let spark: [Double]
     }
 
-    private static let dollars: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencyCode = "USD"
-        return f
-    }()
+    nonisolated private static func dollars(_ value: Double) -> String {
+        let s = String(format: "%.2f", max(0, value))
+        var parts = s.split(separator: ".")
+        var whole = String(parts.removeFirst())
+        var grouped = ""
+        while whole.count > 3 {
+            let cut = whole.index(whole.endIndex, offsetBy: -3)
+            grouped = "," + whole[cut...] + grouped
+            whole = String(whole[..<cut])
+        }
+        return "$" + whole + grouped + "." + (parts.first.map(String.init) ?? "00")
+    }
 
     /// "Last 7/30 days" totals with per-day bars, from the same device-wide
     /// scans that feed today's spend.
@@ -48,7 +54,7 @@ final class Store: ObservableObject {
             let max = daySums.max() ?? 0
             let spark = max > 0 ? daySums.reversed().map { $0 / max } : []
             lines.append(HistoryLine(id: id, label: label,
-                                     total: Self.dollars.string(from: NSNumber(value: total))!,
+                                     total: Self.dollars(total),
                                      spark: spark))
         }
         return lines
@@ -83,11 +89,14 @@ final class Store: ObservableObject {
                 merged.append(old)
             }
         }
-        readings = await Providers.attachLocalCosts(merged, enabled: config.providers.filter(\.enabled))
         let types = Set(config.providers.filter(\.enabled).map(\.type))
+        let pricing = await Pricing.load()
         let daily = await Task.detached {
-            CostScan.dailyTotals(days: 30, types: types, pricing: await Pricing.load())
+            CostScan.dailyTotals(days: 30, types: types, pricing: pricing)
         }.value
+        readings = Providers.attachLocalCosts(
+            merged, enabled: config.providers.filter(\.enabled),
+            today: daily.mapValues { $0.first ?? 0 })
         history = Self.historyLines(daily)
         let names = Set(config.providers.map(\.name))
         lastFetch = lastFetch.filter { names.contains($0.key) }

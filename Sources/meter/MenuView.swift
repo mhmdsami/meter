@@ -25,11 +25,12 @@ struct MenuContent: View {
                                 Text(line.total).font(.caption).monospacedDigit()
                             }
                             HStack(alignment: .bottom, spacing: 2) {
+                                let n = max(1, line.spark.count)
+                                let barWidth = (276.0 - 2.0 * Double(n - 1)) / Double(n)
                                 ForEach(line.spark.indices, id: \.self) { i in
                                     RoundedRectangle(cornerRadius: 1)
                                         .fill(Color.primary.opacity(0.3))
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: max(2, line.spark[i] * 22))
+                                        .frame(width: barWidth, height: max(2, line.spark[i] * 22))
                                 }
                             }
                             .frame(height: 22, alignment: .bottom)
