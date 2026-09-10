@@ -1,6 +1,6 @@
 import Foundation
 
-struct UsageWindow: Identifiable {
+struct UsageWindow: Identifiable, Codable {
     let id: String
     let label: String
     var usedPercent: Double?
@@ -30,7 +30,7 @@ enum BarColor {
     case green, orange, red
 }
 
-struct InstanceReading: Identifiable {
+struct InstanceReading: Identifiable, Codable {
     let id: String
     let type: String
     let name: String

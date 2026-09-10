@@ -2,15 +2,18 @@ import SwiftUI
 
 struct MenuContent: View {
     @ObservedObject var store = Store.shared
+    @ObservedObject var net = NetworkMonitor.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let err = store.config.configError {
+            if !net.isOnline {
+                Text("offline — showing last known readings").font(.caption).foregroundStyle(.secondary)
+            } else if let err = store.config.configError {
                 Text(err).font(.caption).foregroundStyle(.red)
             }
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(store.readings) { Row($0) }
-                if store.readings.isEmpty {
+                if store.readings.isEmpty, net.isOnline {
                     Text("no providers enabled — open config").font(.caption).foregroundStyle(.secondary)
                 }
             }

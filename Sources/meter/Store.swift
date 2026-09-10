@@ -1,5 +1,23 @@
 import Foundation
 import Combine
+import Network
+
+/// System connectivity, so meter makes zero requests while offline and
+/// refreshes the moment the network returns.
+final class NetworkMonitor: ObservableObject {
+    static let shared = NetworkMonitor()
+    @Published var isOnline = true
+    private let monitor = NWPathMonitor()
+
+    private init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                self?.isOnline = path.status == .satisfied
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "meter.netmon"))
+    }
+}
 
 @MainActor
 final class Store: ObservableObject {
@@ -14,6 +32,24 @@ final class Store: ObservableObject {
 
     init(config: Config) {
         self.config = config
+        // last known readings survive restarts, so the bar never blanks at $0
+        // while the first refresh scans and fetches
+        if let data = try? Data(contentsOf: Self.readingsCacheURL),
+           let cached = try? JSONDecoder().decode([InstanceReading].self, from: data) {
+            readings = cached
+        }
+    }
+
+    private static var readingsCacheURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".cache/meter/readings.json")
+    }
+
+    private static func persist(_ readings: [InstanceReading]) {
+        let url = readingsCacheURL
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard let data = try? JSONEncoder().encode(readings) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 
     var totalToday: Double { readings.totalToday }
@@ -69,9 +105,23 @@ final class Store: ObservableObject {
                 await self?.refreshAll()
             }
         }
+        reconnectTask = Task { [weak self] in
+            var wasOnline = true
+            while !Task.isCancelled {
+                let online = NetworkMonitor.shared.isOnline
+                if online, !wasOnline { await self?.refreshAll(force: true) }
+                wasOnline = online
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
     }
 
+    private var reconnectTask: Task<Void, Never>?
+
     func refreshAll(force: Bool = false) async {
+        // offline: make no requests at all; keep showing cached readings and
+        // wait for the reconnect watcher to force a refresh
+        guard NetworkMonitor.shared.isOnline else { return }
         config = ConfigStore.load()
         let now = Date()
         let dueNames = Self.dueInstances(
@@ -89,14 +139,19 @@ final class Store: ObservableObject {
                 merged.append(old)
             }
         }
+        // publish readings fast: today's buckets only need files touched today;
+        // the 30-day history pass below reuses their cached parse
         let types = Set(config.providers.filter(\.enabled).map(\.type))
         let pricing = await Pricing.load()
-        let daily = await Task.detached {
-            CostScan.dailyTotals(days: 30, types: types, pricing: pricing)
+        let today = await Task.detached {
+            CostScan.dailyTotals(days: 1, types: types, pricing: pricing)
         }.value
         readings = Providers.attachLocalCosts(
             merged, enabled: config.providers.filter(\.enabled),
-            today: daily.mapValues { $0.first ?? 0 })
+            today: today.mapValues { $0.first ?? 0 })
+        let daily = await Task.detached {
+            CostScan.dailyTotals(days: 30, types: types, pricing: pricing)
+        }.value
         history = Self.historyLines(daily)
         let names = Set(config.providers.map(\.name))
         lastFetch = lastFetch.filter { names.contains($0.key) }
