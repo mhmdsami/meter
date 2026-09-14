@@ -40,12 +40,12 @@ final class Store: ObservableObject {
         }
     }
 
-    private static var readingsCacheURL: URL {
+    nonisolated private static var readingsCacheURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cache/meter/readings.json")
     }
 
-    private static func persist(_ readings: [InstanceReading]) {
+    nonisolated private static func persist(_ readings: [InstanceReading]) {
         let url = readingsCacheURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard let data = try? JSONEncoder().encode(readings) else { return }
@@ -149,6 +149,8 @@ final class Store: ObservableObject {
         readings = Providers.attachLocalCosts(
             merged, enabled: config.providers.filter(\.enabled),
             today: today.mapValues { $0.first ?? 0 })
+        let snapshot = readings
+        Task.detached { Self.persist(snapshot) }
         let daily = await Task.detached {
             CostScan.dailyTotals(days: 30, types: types, pricing: pricing)
         }.value
