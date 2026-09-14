@@ -4,12 +4,24 @@ enum Claude {
     static let keychainService = "Claude Code-credentials"
 
     static func fetch(_ instance: ProviderInstance) async throws -> InstanceReading {
+        // an expired token gets a 429 from Anthropic, not a 401 — surface the real
+        // problem instead of backing off on a bogus rate limit for hours
+        var creds = try loadCredentials()
+        if let expiry = creds.expiresAt, expiry <= Date() {
+            // our per-launch keychain copy may predate a `claude login`
+            Keychain.invalidateGeneric(service: keychainService)
+            creds = try loadCredentials()
+            if let expiry = creds.expiresAt, expiry <= Date() {
+                let when = DateFormatter.localizedString(from: expiry, dateStyle: .short, timeStyle: .short)
+                throw ProviderError.badResponse("Claude credentials expired \(when) — run `claude login`")
+            }
+        }
         // Claude Code rotates its access token; our per-launch keychain copy goes stale
         let obj = try await retryingOn401(
             invalidate: { Keychain.invalidateGeneric(service: keychainService) },
             staleMessage: "token rejected after re-read — run `claude login`"
         ) {
-            try await usage(token: try loadToken())
+            try await usage(token: creds.token)
         }
         return map(instance: instance, usage: obj)
     }
@@ -21,7 +33,12 @@ enum Claude {
             .appendingPathComponent(".claude/.credentials.json")
     }
 
-    static func loadToken() throws -> String {
+    struct Credentials {
+        let token: String
+        let expiresAt: Date?
+    }
+
+    static func loadCredentials() throws -> Credentials {
         var json: [String: Any]?
         if let data = try? Data(contentsOf: credsURL),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -39,7 +56,12 @@ enum Claude {
         guard let access = oauth["accessToken"] as? String else {
             throw ProviderError.badResponse("credentials hold no claudeAiOauth token (Claude Code 2.1.x move?) — re-auth via `claude login`")
         }
-        return access
+        let expiry = optNum(oauth["expiresAt"]).map { Date(timeIntervalSince1970: $0 / 1000) }
+        return Credentials(token: access, expiresAt: expiry)
+    }
+
+    static func loadToken() throws -> String {
+        try loadCredentials().token
     }
 
     // MARK: - usage API
