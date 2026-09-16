@@ -29,6 +29,9 @@ enum Zed {
             staleMessage: "Zed session rejected after re-read — sign in again from the Zed editor"
         ) {
             guard let creds = Keychain.internet(server: server) else {
+                if Keychain.needsAuthorization {
+                    throw ProviderError.missingKey("Zed keychain access needs approval — open the menu and click Refresh, then Allow")
+                }
                 throw ProviderError.missingKey("not signed in to Zed (no keychain entry for \(server)) — sign in from the Zed editor")
             }
             return try await HTTP.getJSON(

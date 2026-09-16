@@ -49,6 +49,9 @@ enum Claude {
             json = obj
         }
         guard let root = json else {
+            if Keychain.needsAuthorization {
+                throw ProviderError.missingKey("Claude keychain access needs approval — open the menu and click Refresh, then Allow")
+            }
             throw ProviderError.badResponse("no Claude credentials — run `claude login`")
         }
         // 2.1.x keychain items may hold only mcpOAuth state

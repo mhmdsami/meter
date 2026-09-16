@@ -118,10 +118,14 @@ final class Store: ObservableObject {
 
     private var reconnectTask: Task<Void, Never>?
 
-    func refreshAll(force: Bool = false) async {
+    /// `interactive` is true only for user-initiated refreshes, which may raise a
+    /// keychain authorization dialog; background cycles read without prompting.
+    func refreshAll(force: Bool = false, interactive: Bool = false) async {
         // offline: make no requests at all; keep showing cached readings and
         // wait for the reconnect watcher to force a refresh
         guard NetworkMonitor.shared.isOnline else { return }
+        Keychain.setInteraction(interactive)
+        defer { Keychain.setInteraction(false) }
         config = ConfigStore.load()
         let now = Date()
         let dueNames = Self.dueInstances(
