@@ -94,6 +94,66 @@ final class CostScanTests: XCTestCase {
         XCTAssertEqual(b[day("2026-01-02T09:00:00Z")] ?? -1, 1.875, accuracy: 0.0001)
     }
 
+    // MARK: - fx gateway split
+
+    private func fxLine(_ id: String, cost: Double, model: String, input: Int, read: Int = 0, output: Int = 0) -> String {
+        """
+        {"kind":"generation","fact":{"id":"\(id)","created_at_ms":1770000000000,"model":"\(model)","input_tokens":\(input),"cache_read_tokens":\(read),"output_tokens":\(output),"total_cost":\(cost)}}
+        """
+    }
+
+    func testFxPaidUsageStaysWithGateway() {
+        let text = fxLine("g1", cost: 1.5, model: "openai/gpt-5.2", input: 1_000_000, output: 0)
+        let vercel = CostScan.vercelBuckets(text: text, pricing: pricing)
+        XCTAssertEqual(vercel[day("2026-02-02T00:00:00Z")] ?? -1, 1.5, accuracy: 0.0001)
+        XCTAssertTrue(CostScan.fxCodexBuckets(text: text, pricing: pricing).isEmpty)
+    }
+
+    func testFxZeroCostCodexUsageBelongsToCodex() {
+        // subscription-billed codex models report $0 and must not inflate the gateway row
+        let text = fxLine("g1", cost: 0, model: "codex/gpt-5.2", input: 1_000_000, read: 0, output: 1_000_000)
+        XCTAssertTrue(CostScan.vercelBuckets(text: text, pricing: pricing).isEmpty)
+        let codex = CostScan.fxCodexBuckets(text: text, pricing: pricing)
+        XCTAssertEqual(codex[day("2026-02-02T00:00:00Z")] ?? -1, 3.0, accuracy: 0.0001)
+    }
+
+    // MARK: - pi sessions
+
+    private func piLine(_ ts: String, id: String, model: String,
+                        input: Int, read: Int = 0, write: Int = 0, output: Int) -> String {
+        """
+        {"type":"message","id":"\(id)","timestamp":"\(ts)","message":{"role":"assistant","model":"\(model)","usage":{"input":\(input),"cacheRead":\(read),"cacheWrite":\(write),"output":\(output)}}}
+        """
+    }
+
+    func testPiAssistantUsagePricedAtList() {
+        let text = """
+        {"type":"session","version":3,"id":"abc"}
+        \(piLine("2026-01-02T09:00:00Z", id: "m1", model: "anthropic/claude-sonnet-4-5", input: 1_000_000, read: 500_000, output: 100_000))
+        """
+        // 1M fresh in @ $3 + 0.5M cache-read @ $0.3 + 0.1M out @ $15
+        let b = CostScan.fileBuckets(text: text, format: .pi, pricing: pricing)
+        XCTAssertEqual(b[day("2026-01-02T09:00:00Z")] ?? -1, 3.0 + 0.15 + 1.5, accuracy: 0.0001)
+    }
+
+    func testPiThinkingSuffixStrippedForPricing() {
+        let text = piLine("2026-01-02T09:00:00Z", id: "m1",
+                          model: "anthropic/claude-sonnet-4-5-thinking-medium",
+                          input: 1_000_000, output: 0)
+        let b = CostScan.fileBuckets(text: text, format: .pi, pricing: pricing)
+        XCTAssertEqual(b[day("2026-01-02T09:00:00Z")] ?? -1, 3.0, accuracy: 0.0001)
+    }
+
+    func testPiIgnoresUserRowsAndDeduplicates() {
+        let text = """
+        {"type":"message","id":"u1","timestamp":"2026-01-02T09:00:00Z","message":{"role":"user","content":[]}}
+        \(piLine("2026-01-02T09:00:00Z", id: "m1", model: "anthropic/claude-sonnet-4-5", input: 1_000_000, output: 0))
+        \(piLine("2026-01-02T09:00:00Z", id: "m1", model: "anthropic/claude-sonnet-4-5", input: 2_000_000, output: 0))
+        """
+        let b = CostScan.fileBuckets(text: text, format: .pi, pricing: pricing)
+        XCTAssertEqual(b[day("2026-01-02T09:00:00Z")] ?? -1, 6.0, accuracy: 0.0001)
+    }
+
     // MARK: - per-file cache
 
     private func writeFixture(_ url: URL, _ text: String) throws {

@@ -28,8 +28,9 @@ Sources/meter/
   HTTP.swift         URLSession helpers, error types, ISO date parsing
   Reading.swift      InstanceReading / UsageWindow models, aggregation
   Providers.swift    registry: type string -> fetcher, fan-out, cost attachment
-   CostScan.swift     today-$ scans: Codex rollouts, Claude projects + Desktop
-                      stores, opencode.db, pi/OMP sessions, fx usage log
+   CostScan.swift     today-$ scans: Codex rollouts + gateway codex usage,
+                      Claude projects + Desktop stores, opencode.db, pi/OMP
+                      sessions, fx gateway log
    Pricing.swift      models.dev price table, cached in ~/.cache/meter/models.json
   SQLite.swift       thin readonly libsqlite3 wrapper
   PrintMode.swift    --print rendering

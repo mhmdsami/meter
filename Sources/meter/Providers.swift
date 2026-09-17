@@ -26,6 +26,7 @@ enum Providers {
         "vercel": VercelGateway.fetch,
         "antigravity": Antigravity.fetch,
         "amp": Amp.fetch,
+        "pi": Pi.fetch,
     ]
 
     static func fetch(_ instance: ProviderInstance) async -> InstanceReading {
@@ -79,17 +80,19 @@ enum Providers {
 
         static let all: [LocalCostSource] = [
             .firstEnabled("codex") { pricing, windowStart in
-                CostScan.buckets(urls: CostScan.codexURLs(windowStart: windowStart),
-                                 format: .codex, windowStart: windowStart, pricing: pricing)
+                CostScan.codexSourceBuckets(windowStart: windowStart, pricing: pricing)
             },
             .firstEnabled("claude") { pricing, windowStart in
                 CostScan.buckets(urls: CostScan.claudeURLs(),
                                  format: .claude, windowStart: windowStart, pricing: pricing)
             },
             .firstEnabled("vercel") { pricing, windowStart in
-                CostScan.buckets(urls: [FileManager.default.homeDirectoryForCurrentUser
-                    .appendingPathComponent(".fx/usage.jsonl")],
-                    format: .vercel, windowStart: windowStart, pricing: pricing)
+                CostScan.buckets(urls: [CostScan.fxURL()],
+                                 format: .vercel, windowStart: windowStart, pricing: pricing)
+            },
+            .firstEnabled("pi") { pricing, windowStart in
+                CostScan.buckets(urls: CostScan.piURLs(),
+                                 format: .pi, windowStart: windowStart, pricing: pricing)
             },
             .init(type: "opencode",
                   buckets: { _, windowStart in CostScan.opencodeBuckets(windowStart: windowStart) },

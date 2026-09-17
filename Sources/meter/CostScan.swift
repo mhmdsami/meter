@@ -98,7 +98,7 @@ enum CostScan {
 
     // MARK: - shared JSONL bucketing
 
-    enum LogFormat { case codex, claude, vercel }
+    enum LogFormat { case codex, claude, vercel, pi }
 
     private struct Stamp: Equatable {
         let mtime: Date
@@ -147,6 +147,7 @@ enum CostScan {
         case .codex: return codexBuckets(text: text, pricing: pricing)
         case .claude: return claudeBuckets(text: text, pricing: pricing)
         case .vercel: return vercelBuckets(text: text, pricing: pricing)
+        case .pi: return piBuckets(text: text, pricing: pricing)
         }
     }
 
@@ -275,52 +276,140 @@ enum CostScan {
 
     // MARK: - Vercel AI Gateway (fx CLI log)
 
-    // ~/.fx/usage.jsonl logs every generation with a precomputed total_cost; "pending"
-    // lines share ids with their final "generation" line, so dedupe by id. The gateway
-    // reports $0 for subscription-billed codex/* models — estimate those at list price
-    // from the logged tokens (cached reads are a subset of input, Codex-style).
-    static func vercelBuckets(text: String, pricing: Pricing) -> [Date: Double] {
-        struct Gen {
-            var cost: Double
-            var tokens: Double
-            var input: Double
-            var read: Double
-            var output: Double
-            var model: String
-            var day: Date
-        }
-        var best: [String: Gen] = [:]
+    struct FxGeneration {
+        let cost: Double
+        let tokens: Double
+        let input: Double
+        let read: Double
+        let output: Double
+        let model: String
+        let day: Date
+    }
+
+    static func fxURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".fx/usage.jsonl")
+    }
+
+    /// ~/.fx/usage.jsonl logs every generation with a precomputed total_cost; "pending"
+    /// lines share ids with their final "generation" line, so dedupe by id.
+    static func fxGenerations(text: String) -> [FxGeneration] {
+        var best: [String: FxGeneration] = [:]
         for line in text.split(separator: "\n") {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                   obj["kind"] as? String == "generation",
                   let fact = obj["fact"] as? [String: Any],
                   let id = fact["id"] as? String,
                   let ms = optNum(fact["created_at_ms"]) else { continue }
-            let created = Date(timeIntervalSince1970: ms / 1000)
             let input = optNum(fact["input_tokens"]) ?? 0
             let read = optNum(fact["cache_read_tokens"]) ?? 0
             let output = optNum(fact["output_tokens"]) ?? 0
-            let gen = Gen(cost: optNum(fact["total_cost"]) ?? 0,
-                          tokens: input + read + output,
-                          input: input, read: read, output: output,
-                          model: (fact["model"] as? String) ?? "",
-                          day: day(created))
+            let gen = FxGeneration(cost: optNum(fact["total_cost"]) ?? 0,
+                                   tokens: input + read + output,
+                                   input: input, read: read, output: output,
+                                   model: (fact["model"] as? String) ?? "",
+                                   day: day(Date(timeIntervalSince1970: ms / 1000)))
             if gen.cost > (best[id]?.cost ?? -1)
                 || (gen.cost == best[id]?.cost && gen.tokens > (best[id]?.tokens ?? -1)) {
                 best[id] = gen
             }
         }
+        return Array(best.values)
+    }
+
+    /// What the gateway actually charged: paid generations only. Subscription-billed
+    /// codex/* rows report $0 here and belong to the Codex row.
+    static func vercelBuckets(text: String, pricing: Pricing) -> [Date: Double] {
         var out: [Date: Double] = [:]
-        for gen in best.values {
-            if gen.cost > 0 {
-                out[gen.day, default: 0] += gen.cost
-                continue
-            }
-            guard gen.model.hasPrefix("codex/"),
+        for gen in fxGenerations(text: text) where gen.cost > 0 {
+            out[gen.day, default: 0] += gen.cost
+        }
+        return out
+    }
+
+    /// Subscription-billed codex/* generations routed through the gateway report $0;
+    /// estimate them at list from the logged tokens (cached reads are a subset of input).
+    static func fxCodexBuckets(text: String, pricing: Pricing) -> [Date: Double] {
+        var out: [Date: Double] = [:]
+        for gen in fxGenerations(text: text) {
+            guard gen.cost == 0, gen.model.hasPrefix("codex/"),
                   let cost = pricing.cost(for: String(gen.model.dropFirst("codex/".count))) else { continue }
             out[gen.day, default: 0] += Pricing.dollars(cost, input: gen.input, cachedInput: gen.read, output: gen.output)
         }
         return out
+    }
+
+    /// Codex spend: local rollout files plus subscription-billed usage that was
+    /// routed through the AI Gateway, which reports $0 for those models.
+    static func codexSourceBuckets(windowStart: Date, pricing: Pricing) -> [Date: Double] {
+        var out = buckets(urls: codexURLs(windowStart: windowStart), format: .codex,
+                          windowStart: windowStart, pricing: pricing)
+        if let data = try? Data(contentsOf: fxURL()), let text = String(data: data, encoding: .utf8) {
+            for (dayStart, value) in fxCodexBuckets(text: text, pricing: pricing) where dayStart >= windowStart {
+                out[dayStart, default: 0] += value
+            }
+        }
+        return out
+    }
+
+    // MARK: - pi / OMP agent sessions
+
+    static func piURLs() -> [URL] {
+        var urls: [URL] = []
+        for root in ["~/.pi/agent/sessions", "~/.omp/agent/sessions"] {
+            let dir = URL(fileURLWithPath: NSString(string: root).expandingTildeInPath)
+            guard let en = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.isRegularFileKey]) else { continue }
+            for case let url as URL in en where url.pathExtension == "jsonl" {
+                urls.append(url)
+            }
+        }
+        return urls
+    }
+
+    /// pi: one assistant "message" row per turn with Claude-style usage; dedupe by
+    /// message id and price at list (pi's own cost field is unreliable).
+    static func piBuckets(text: String, pricing: Pricing) -> [Date: Double] {
+        struct Msg {
+            var sum: Double
+            var input: Double
+            var read: Double
+            var write: Double
+            var output: Double
+            var model: String
+            var day: Date
+        }
+        var best: [String: Msg] = [:]
+        eachLine(text) { obj in
+            guard obj["type"] as? String == "message",
+                  let message = obj["message"] as? [String: Any],
+                  message["role"] as? String == "assistant",
+                  let usage = message["usage"] as? [String: Any],
+                  let ts = (obj["timestamp"] as? String).flatMap(isoDate) else { return }
+            let id = (obj["id"] as? String) ?? UUID().uuidString
+            let input = num(usage["input"])
+            let read = num(usage["cacheRead"])
+            let write = num(usage["cacheWrite"])
+            let output = num(usage["output"])
+            let sum = input + output + read + write
+            if sum > (best[id]?.sum ?? -1) {
+                best[id] = Msg(sum: sum, input: input, read: read, write: write, output: output,
+                               model: (message["model"] as? String) ?? "", day: day(ts))
+            }
+        }
+        var out: [Date: Double] = [:]
+        for msg in best.values {
+            guard msg.sum > 0, let cost = piCost(for: msg.model, pricing: pricing) else { continue }
+            out[msg.day, default: 0] += Pricing.dollarsClaude(
+                cost, input: msg.input, cacheRead: msg.read, cacheWrite: msg.write, output: msg.output)
+        }
+        return out
+    }
+
+    private static func piCost(for routedModel: String, pricing: Pricing) -> Pricing.ModelCost? {
+        let bare = routedModel.split(separator: "/").last.map(String.init) ?? routedModel
+        if let cost = pricing.cost(for: bare) { return cost }
+        // pi appends the thinking level: "claude-sonnet-5-thinking-medium" → base model
+        return bare.range(of: #"-thinking-(?:off|minimal|low|medium|high|xhigh|max)$"#, options: .regularExpression)
+            .flatMap { pricing.cost(for: String(bare[..<$0.lowerBound])) }
     }
 
     // MARK: - shared JSONL line iteration
