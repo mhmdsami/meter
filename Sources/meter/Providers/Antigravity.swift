@@ -1,26 +1,40 @@
 import Foundation
 
 enum Antigravity {
+    struct Probe {
+        let port: Int
+        let pid: pid_t
+        let masterFD: Int32
+        /// agy 1.2.4+ gates its language server behind a CSRF token; when we spawn
+        /// with `--csrf_token <token>` we must echo it. Older builds are tokenless.
+        let csrf: String?
+    }
+
     static func fetch(_ instance: ProviderInstance) async throws -> InstanceReading {
         // reuse a live agy between refreshes instead of paying the ~12s cold start
         // every poll; reaped after idle. ponytail: single warm session — one account.
-        if takeWarm() {
+        if takeWarm(), let w = warmProbe() {
             do {
-                let obj = try await quota(port: warm!.port)
+                let obj = try await quota(port: w.port, csrf: w.csrf)
                 return map(instance: instance, summary: obj)
             } catch {
                 reapWarm()
             }
         }
-        let probe = try await probe()
+        let probe = try await start()
         keepWarm(probe)
-        let obj = try await quota(port: probe.port)
+        let obj = try await quota(port: probe.port, csrf: probe.csrf)
         return map(instance: instance, summary: obj)
     }
 
     private static let warmLock = NSLock()
-    private static var warm: (port: Int, pid: pid_t, masterFD: Int32, lastUsed: Date)?
+    private static var warm: (probe: Probe, lastUsed: Date)?
     private static let warmIdle: TimeInterval = 240
+
+    private static func warmProbe() -> Probe? {
+        warmLock.lock(); defer { warmLock.unlock() }
+        return warm?.probe
+    }
 
     private static func takeWarm() -> Bool {
         warmLock.lock(); defer { warmLock.unlock() }
@@ -29,8 +43,8 @@ enum Antigravity {
         return true
     }
 
-    private static func keepWarm(_ probe: (port: Int, pid: pid_t, masterFD: Int32)) {
-        warmLock.lock(); warm = (probe.port, probe.pid, probe.masterFD, Date()); warmLock.unlock()
+    private static func keepWarm(_ probe: Probe) {
+        warmLock.lock(); warm = (probe, Date()); warmLock.unlock()
         Task.detached {
             try? await Task.sleep(nanoseconds: 300_000_000_000)
             reapIdle()
@@ -44,8 +58,8 @@ enum Antigravity {
         }
         warm = nil
         warmLock.unlock()
-        kill(-w.pid, SIGTERM)
-        close(w.masterFD)
+        kill(-w.probe.pid, SIGTERM)
+        close(w.probe.masterFD)
     }
 
     private static func reapWarm() {
@@ -54,8 +68,8 @@ enum Antigravity {
         warm = nil
         warmLock.unlock()
         if let w {
-            kill(-w.pid, SIGTERM)
-            close(w.masterFD)
+            kill(-w.probe.pid, SIGTERM)
+            close(w.probe.masterFD)
         }
     }
 
@@ -79,28 +93,36 @@ enum Antigravity {
     /// Spawns `agy` under a PTY (it's a bubbletea TUI that refuses to run without a TTY),
     /// as a session leader with a controlling terminal — matching how an interactive
     /// terminal runs it (Foundation's Process can't setsid/TIOCSCTTY).
-    static func probe() async throws -> (port: Int, pid: pid_t, masterFD: Int32) {
+    /// Old agy builds ignore the flag; new ones require the token we generate.
+    static func start() async throws -> Probe {
+        if let probe = try? await probe(csrf: UUID().uuidString) { return probe }
+        if let probe = try? await probe(csrf: nil) { return probe }
+        throw ProviderError.badResponse("agy started but no local server port appeared within 12s — is it signed in?")
+    }
+
+    static func probe(csrf: String?) async throws -> Probe? {
         guard let agy = findAgy() else {
             throw ProviderError.badResponse("agy not found — brew install --cask antigravity-cli, then run `agy` once and sign in")
         }
-        let (pid, masterFD) = try forkAgy(executable: agy)
+        reapOrphans()
+        let (pid, masterFD) = try forkAgy(executable: agy, csrf: csrf)
 
         // Fixed 12s readiness budget; agy needs a few seconds for keyring auth on cold start
         let deadline = Date().addingTimeInterval(12)
         var sawExit = false
         while Date() < deadline {
-            if let port = listeningPort() { return (port, pid, masterFD) }
+            if let port = listeningPort(pid: pid) { return Probe(port: port, pid: pid, masterFD: masterFD, csrf: csrf) }
             if waitpid(pid, nil, WNOHANG) != 0 { sawExit = true; break }
             try await Task.sleep(nanoseconds: 500_000_000)
         }
         if !sawExit { kill(-pid, SIGTERM) }
         close(masterFD)
-        throw ProviderError.badResponse("agy started but no local server port appeared within 12s — is it signed in?")
+        return nil
     }
 
     /// Minimal PTY spawn: child is a session leader whose first tty open becomes its
     /// controlling terminal (BSD semantics), so agy believes it runs interactively.
-    static func forkAgy(executable: String) throws -> (pid_t, Int32) {
+    static func forkAgy(executable: String, csrf: String?) throws -> (pid_t, Int32) {
         let master = posix_openpt(O_RDWR | O_NOCTTY)
         guard master >= 0, grantpt(master) == 0, unlockpt(master) == 0 else {
             if master >= 0 { close(master) }
@@ -135,7 +157,12 @@ enum Antigravity {
         posix_spawnattr_init(&attr)
         posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSID))
 
-        var argv: [UnsafeMutablePointer<CChar>?] = [strdup(executable), nil]
+        var argv: [UnsafeMutablePointer<CChar>?] = [strdup(executable)]
+        if let csrf {
+            argv.append(strdup("--csrf_token"))
+            argv.append(strdup(csrf))
+        }
+        argv.append(nil)
         var pid: pid_t = 0
         let rc = posix_spawn(&pid, executable, &actions, &attr, &argv, environ)
         posix_spawn_file_actions_destroy(&actions)
@@ -148,9 +175,11 @@ enum Antigravity {
         return (pid, master)
     }
 
-    /// The quota server runs in agy's language_server CHILD process — matching the agy pid
-    /// finds nothing. Scan all listeners by command name instead.
-    static func listeningPort() -> Int? {
+    /// Only accept a listener owned by the process we spawned (or its language-server
+    /// child): a user's own agy session would otherwise shadow ours, and its server
+    /// would reject the CSRF token we generated.
+    static func listeningPort(pid: pid_t) -> Int? {
+        let pids = Set([pid] + childPids(pid))
         let proc = Process()
         let pipe = Pipe()
         proc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
@@ -163,9 +192,7 @@ enum Antigravity {
         guard let text = String(data: data, encoding: .utf8) else { return nil }
         for line in text.split(separator: "\n") {
             let parts = line.split(separator: " ").map(String.init)
-            guard parts.count >= 9 else { continue }
-            let command = parts[0]
-            guard command.contains("agy") || command.contains("language_server") else { continue }
+            guard parts.count >= 9, let linePID = pid_t(parts[1]), pids.contains(linePID) else { continue }
             if let port = Int(parts[8].split(separator: ":").last ?? "") {
                 return port
             }
@@ -173,18 +200,64 @@ enum Antigravity {
         return nil
     }
 
+    /// agy is our PTY session leader; a meter restart orphans it (it outlives its
+    /// parent), so reap leftovers carrying our --csrf_token flag before spawning.
+    static func reapOrphans() {
+        let proc = Process()
+        let pipe = Pipe()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        proc.arguments = ["-f", "csrf_token"]
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        guard (try? proc.run()) != nil else { return }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        guard let text = String(data: data, encoding: .utf8) else { return }
+        for line in text.split(separator: "\n") {
+            guard let pid = pid_t(line), pid != getpid() else { continue }
+            // orphaned (reparented to launchd) and ours — no user agy passes the flag
+            if let ppid = parentPid(pid), ppid == 1 {
+                kill(-pid, SIGTERM)
+            }
+        }
+    }
+
+    private static func parentPid(_ pid: pid_t) -> pid_t? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        return info.kp_eproc.e_ppid
+    }
+
+    private static func childPids(_ pid: pid_t) -> [pid_t] {
+        let proc = Process()
+        let pipe = Pipe()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        proc.arguments = ["-P", String(pid)]
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        guard (try? proc.run()) != nil else { return [] }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        return String(data: data, encoding: .utf8)?
+            .split(separator: "\n").compactMap { pid_t($0) } ?? []
+    }
+
     // MARK: - quota
 
-    static func quota(port: Int) async throws -> [String: Any] {
+    static func quota(port: Int, csrf: String?) async throws -> [String: Any] {
         let url = URL(string: "https://127.0.0.1:\(port)/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary")!
         let body = try JSONSerialization.data(withJSONObject: [
             "ideName": "antigravity", "extensionName": "antigravity", "locale": "en", "ideVersion": "unknown",
         ])
+        var headers: [String: String] = [:]
+        if let csrf { headers["X-Codeium-Csrf-Token"] = csrf }
         // cold keyring auth can briefly 500 while the server warms up
         var lastError: Error = ProviderError.badResponse("no attempts")
         for _ in 0..<8 {
             do {
-                let data = try await InsecureLoopback.request(url, body: body)
+                let data = try await InsecureLoopback.request(url, body: body, headers: headers)
                 guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     throw ProviderError.badResponse("agy quota response not JSON")
                 }
@@ -249,12 +322,13 @@ enum InsecureLoopback {
         return URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
     }()
 
-    static func request(_ url: URL, body: Data) async throws -> Data {
+    static func request(_ url: URL, body: Data, headers: [String: String] = [:]) async throws -> Data {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("1", forHTTPHeaderField: "Connect-Protocol-Version")
+        for (name, value) in headers { req.setValue(value, forHTTPHeaderField: name) }
         req.httpBody = body
         let (data, resp) = try await session.data(for: req)
         guard let status = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) else {
