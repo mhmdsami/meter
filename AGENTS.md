@@ -31,9 +31,11 @@ Sources/meter/
    CostScan.swift     today-$ scans: Codex rollouts + gateway codex usage,
                       Claude projects + Desktop stores, opencode.db, pi/OMP
                       sessions, fx gateway log
+  Ledger.swift       writable sqlite: daily spend rows + quota snapshots
+  Dashboard.swift    static HTML dashboard rendered from the ledger
    Pricing.swift      models.dev price table, cached in ~/.cache/meter/models.json
   SQLite.swift       thin readonly libsqlite3 wrapper
-  PrintMode.swift    --print rendering
+  PrintMode.swift    --print / --json / --dashboard one-shot modes
   MenuView.swift     dropdown rows, bars, countdowns
   Providers/*.swift  one file per provider type
 Tests/MeterTests/    XCTest, no host app
@@ -51,6 +53,9 @@ Tests/MeterTests/    XCTest, no host app
   Claude keychain items). Read-only, always.
 - Secrets stay in the keychain, env, or CLI credential files. The config
   file holds references, not keys, and is chmod 600.
+- The ledger (`~/.local/share/meter/usage.db`) is user data, not cache: rows
+  are upserted by (day, provider), today is provisional and past days are
+  final, and a failed ledger write must never block or fail the UI.
 - install.sh signs the binary with a stable self-signed `meter codesign`
   identity. Keychain ACLs key off that signature; stripping the codesign
   step makes every rebuild re-prompt for Claude/Zed credentials.

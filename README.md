@@ -67,8 +67,24 @@ credential after the first install; after that, rebuilds are silent.
 Check everything from a terminal instead of the menu:
 
 ```sh
-meter --print
+meter --print          # one refresh cycle, table to stdout
+meter --json           # same data as JSON, for scripts
+meter --dashboard      # render an HTML dashboard from the ledger and open it
 ```
+
+## Usage history
+
+Every refresh writes day-by-day totals into a SQLite ledger at
+`~/.local/share/meter/usage.db` (one row per day per provider, upserted, so a
+refresh can never double-count). The first run backfills 90 days from the same
+local scans; after that only today is recomputed, and a day is frozen once it
+ends so later price-table changes cannot rewrite the past. Rows are tagged
+`reported` (the provider told us what it billed) or `estimated` (list price).
+
+`meter --dashboard` renders that ledger as a self-contained HTML page — spend
+cards, per-provider daily bars, a per-day table, and burn-rate estimates from
+the quota snapshots the app records each refresh. The menu's Dashboard button
+does the same thing.
 
 ## Config
 

@@ -54,6 +54,9 @@ final class Store: ObservableObject {
 
     var totalToday: Double { readings.totalToday }
 
+    /// Providers whose spend is billed money rather than a list-price estimate.
+    nonisolated static let reportedProviders: Set<String> = ["opencode", "vercel"]
+
     struct HistoryLine: Identifiable, Equatable {
         let id: String
         let label: String
@@ -159,6 +162,26 @@ final class Store: ObservableObject {
             CostScan.dailyTotals(days: 30, types: types, pricing: pricing)
         }.value
         history = Self.historyLines(daily)
+        let enabled = config.providers.filter(\.enabled)
+        let targets = Providers.costTargetNames(enabled: enabled)
+        let gen = pricing.generation
+        let backfillNeeded = Ledger.shared.meta("backfilled") == nil
+        let typesForBackfill = types
+        let snapshotReadings = readings
+        Task.detached {
+            Ledger.shared.recordDaily(daily, targetNames: targets,
+                                      pricingGen: gen, reported: Self.reportedProviders)
+            if backfillNeeded {
+                // one-time: seed the ledger with longer history from the same scans
+                let widePricing = await Pricing.load()
+                let wide = CostScan.dailyTotals(days: 90, types: typesForBackfill, pricing: widePricing)
+                Ledger.shared.recordDaily(wide, targetNames: targets,
+                                          pricingGen: widePricing.generation,
+                                          reported: Self.reportedProviders)
+                Ledger.shared.setMeta("backfilled", ISO8601DateFormatter().string(from: Date()))
+            }
+            Ledger.shared.recordQuotaSnapshots(snapshotReadings)
+        }
         let names = Set(config.providers.map(\.name))
         lastFetch = lastFetch.filter { names.contains($0.key) }
         lastRefresh = Date()

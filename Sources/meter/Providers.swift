@@ -29,6 +29,16 @@ enum Providers {
         "pi": Pi.fetch,
     ]
 
+    /// Instance name each device-wide cost source currently attaches to, used as
+    /// the ledger's account label (device-wide scans are per provider, not per key).
+    static func costTargetNames(enabled: [ProviderInstance]) -> [String: String] {
+        var out: [String: String] = [:]
+        for source in LocalCostSource.all {
+            if let name = source.target(enabled)?.name { out[source.type] = name }
+        }
+        return out
+    }
+
     static func fetch(_ instance: ProviderInstance) async -> InstanceReading {
         guard let fetch = all[instance.type] else {
             return InstanceReading(id: instance.name, type: instance.type, name: instance.name,
