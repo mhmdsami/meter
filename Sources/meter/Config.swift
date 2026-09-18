@@ -33,19 +33,37 @@ struct ProviderInstance: Codable, Identifiable, Equatable {
     }
 }
 
+struct NotificationSettings: Codable, Equatable {
+    var enabled = true
+    /// Alert once per window when usage crosses this percentage.
+    var windowPercent: Double = 90
+    /// Alert once per day when today's estimated spend exceeds this (nil = off).
+    var dailySpend: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case windowPercent = "window_percent"
+        case dailySpend = "daily_spend"
+    }
+}
+
 struct Config: Codable {
     var intervalMinutes: Int = 5
     var providers: [ProviderInstance] = []
+    var notifications = NotificationSettings()
     var configError: String?
 
     enum CodingKeys: String, CodingKey {
         case intervalMinutes = "interval_minutes"
         case providers
+        case notifications
     }
 
-    init(intervalMinutes: Int = 5, providers: [ProviderInstance] = [], configError: String? = nil) {
+    init(intervalMinutes: Int = 5, providers: [ProviderInstance] = [],
+         notifications: NotificationSettings = NotificationSettings(), configError: String? = nil) {
         self.intervalMinutes = intervalMinutes
         self.providers = providers
+        self.notifications = notifications
         self.configError = configError
     }
 
@@ -53,6 +71,7 @@ struct Config: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         intervalMinutes = try c.decodeIfPresent(Int.self, forKey: .intervalMinutes) ?? 5
         providers = try c.decodeIfPresent([ProviderInstance].self, forKey: .providers) ?? []
+        notifications = try c.decodeIfPresent(NotificationSettings.self, forKey: .notifications) ?? NotificationSettings()
         configError = nil
     }
 }

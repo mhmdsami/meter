@@ -33,6 +33,7 @@ Sources/meter/
                       sessions, fx gateway log
   Ledger.swift       writable sqlite: daily spend rows + quota snapshots
   Dashboard.swift    static HTML dashboard rendered from the ledger
+  Notifier.swift     threshold alerts (pure decision + UNUserNotificationCenter)
    Pricing.swift      models.dev price table, cached in ~/.cache/meter/models.json
   SQLite.swift       thin readonly libsqlite3 wrapper
   PrintMode.swift    --print / --json / --dashboard one-shot modes

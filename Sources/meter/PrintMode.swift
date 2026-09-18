@@ -3,13 +3,17 @@ import Foundation
 enum PrintMode {
     /// One-shot CLI modes; any of these skips the menu bar app entirely.
     static var requested: Bool {
-        CommandLine.arguments.contains { ["--print", "--json", "--dashboard"].contains($0) }
+        CommandLine.arguments.contains { ["--print", "--json", "--dashboard", "--test-notify"].contains($0) }
     }
 
     static func runAndExit() -> Never {
         let args = CommandLine.arguments
         let json = args.contains("--json")
         let dashboard = args.contains("--dashboard")
+        if args.contains("--test-notify") {
+            Notifier.sendTest()  // exits from the authorization callback
+            dispatchMain()
+        }
         Task.detached {
             if dashboard {
                 Dashboard.writeAndOpen(days: intArg("--days") ?? 90)

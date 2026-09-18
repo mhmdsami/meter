@@ -88,6 +88,23 @@ cards, per-provider daily bars, a per-day table, and burn-rate estimates from
 the quota snapshots the app records each refresh. The menu's Dashboard button
 does the same thing.
 
+## Notifications
+
+Crossing a quota window (default 90%) or a daily spend threshold posts a macOS
+notification — once per window cycle, once per day for spend. `meter
+--test-notify` asks for permission and sends a test. Settings live in the
+config file:
+
+```json
+{
+  "notifications": { "enabled": true, "window_percent": 90, "daily_spend": 50 }
+}
+```
+
+Omit `daily_spend` to disable spend alerts. Notifications need the app bundle
+(`~/Applications/meter.app`); if you denied the prompt, re-enable it in System
+Settings → Notifications → meter.
+
 ## Config
 
 `~/.config/meter/config.json`, created with a sample on first run:

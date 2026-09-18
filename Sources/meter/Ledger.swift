@@ -224,6 +224,17 @@ final class Ledger {
         }.sorted { $0.provider < $1.provider }
     }
 
+    func notifiedKeys() -> Set<String> {
+        let db = ReadOnlyDB(path: url.path)
+        guard let db else { return [] }
+        return Set(db.rows("SELECT key FROM meta WHERE key LIKE 'notified|%'")
+            .compactMap { ReadOnlyDB.text($0["key"]) })
+    }
+
+    func markNotified(_ key: String) {
+        setMeta(key, ISO8601DateFormatter().string(from: Date()))
+    }
+
     // MARK: - reads
 
     struct DayRow {        let day: String
