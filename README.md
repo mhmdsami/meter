@@ -52,9 +52,11 @@ can use a pasted session cookie.
 ./install.sh
 ```
 
-This builds the release binary to `~/.local/bin/meter` and loads the
-`app.meter.meter` LaunchAgent, which starts meter at login and restarts
-it if it crashes.
+This builds `~/Applications/meter.app` (a menu bar app: `LSUIElement`, so no
+Dock icon) and loads the `app.meter.meter` LaunchAgent, which starts meter at
+login and restarts it if it crashes. `~/.local/bin/meter` symlinks to the
+bundle's executable, so the `--print`/`--json`/`--dashboard` modes work from a
+shell.
 
 On first run the script also creates a self-signed `meter codesign`
 certificate and signs the binary with it on every build. This matters:

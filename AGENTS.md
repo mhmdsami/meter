@@ -56,6 +56,9 @@ Tests/MeterTests/    XCTest, no host app
 - The ledger (`~/.local/share/meter/usage.db`) is user data, not cache: rows
   are upserted by (day, provider), today is provisional and past days are
   final, and a failed ledger write must never block or fail the UI.
+- install.sh packages `~/Applications/meter.app`, symlinks `~/.local/bin/meter`
+  at its executable, and signs with `-i meter` so the keychain grants made
+  before bundling keep matching.
 - install.sh signs the binary with a stable self-signed `meter codesign`
   identity. Keychain ACLs key off that signature; stripping the codesign
   step makes every rebuild re-prompt for Claude/Zed credentials.

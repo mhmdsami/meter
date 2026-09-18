@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds meter and installs a LaunchAgent so it starts at login.
+# Builds meter, packages it as a menu bar app bundle, and installs a LaunchAgent.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -21,11 +21,39 @@ if ! security find-certificate -c "$IDENTITY" ~/Library/Keychains/login.keychain
         -P meter -T /usr/bin/codesign
     rm -rf "$tmp"
 fi
-codesign --force --sign "$IDENTITY" .build/release/meter
 
+# A real bundle: LSUIElement keeps it out of the Dock, gives notifications and
+# login-item management a stable identity, and reserves space for widgets.
+APP="$HOME/Applications/meter.app"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS"
+cp -f .build/release/meter "$APP/Contents/MacOS/meter"
+cat > "$APP/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key><string>meter</string>
+    <key>CFBundleIdentifier</key><string>app.meter.meter</string>
+    <key>CFBundleName</key><string>meter</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+PLIST
+
+# -i keeps the signing identifier stable ("meter"), so keychain grants made
+# before the bundle existed keep matching.
+codesign --force --sign "$IDENTITY" -i meter "$APP"
+
+# `meter --print` / --json / --dashboard from a shell
 BIN="$HOME/.local/bin/meter"
 mkdir -p "$HOME/.local/bin"
-cp -f .build/release/meter "$BIN"
+ln -sf "$APP/Contents/MacOS/meter" "$BIN"
 
 PLIST="$HOME/Library/LaunchAgents/app.meter.meter.plist"
 cat > "$PLIST" <<EOF
@@ -35,7 +63,7 @@ cat > "$PLIST" <<EOF
 <dict>
     <key>Label</key><string>app.meter.meter</string>
     <key>ProgramArguments</key>
-    <array><string>$BIN</string></array>
+    <array><string>$APP/Contents/MacOS/meter</string></array>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
 </dict>
@@ -44,5 +72,5 @@ EOF
 
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
-echo "meter installed: $BIN (agent: app.meter.meter)"
+echo "meter installed: $APP (agent: app.meter.meter)"
 echo "menu bar item should appear now; config at ~/.config/meter/config.json"
