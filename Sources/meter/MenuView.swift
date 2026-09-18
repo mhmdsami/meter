@@ -45,6 +45,7 @@ struct MenuContent: View {
             HStack {
                 Button("Refresh") { Task { await Store.shared.refreshAll(force: true, interactive: true) } }
                 Spacer()
+                Button("Dashboard") { Dashboard.writeAndOpen(days: 30) }
                 Button("Config") { NSWorkspace.shared.open(ConfigStore.url) }
                 Button("Quit") { NSApp.terminate(nil) }
             }
@@ -83,9 +84,15 @@ private struct Row: View {
             ForEach(reading.windows) { win in
                 HStack(spacing: 6) {
                     Text(win.label).font(.caption2).foregroundStyle(.secondary).frame(width: 52, alignment: .leading)
-                    ProgressView(value: (win.usedPercent ?? 0) / 100)
-                        .tint(win.barColor.color)
-                        .frame(width: 110)
+                    // drawn rather than ProgressView: SwiftUI greys out control
+                    // tints when the hosting popover is not the active window
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.primary.opacity(0.15))
+                        Capsule()
+                            .fill(win.barColor.color)
+                            .frame(width: max(2, 110 * min(100, win.usedPercent ?? 0) / 100))
+                    }
+                    .frame(width: 110, height: 6)
                     Text(win.percentText).font(.caption2).monospacedDigit().frame(width: 38, alignment: .trailing)
                     Spacer()
                     Text(win.resetsIn ?? "").font(.caption2).foregroundStyle(.secondary)
