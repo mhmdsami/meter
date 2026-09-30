@@ -21,12 +21,12 @@ enum PrintMode {
             }
             let config = ConfigStore.load()
             let types = Set(config.providers.filter(\.enabled).map(\.type))
-            let daily = await CostScan.dailyTotals(days: 30, types: types, pricing: await Pricing.load())
+            let spend = await CostScan.spendTotals(days: 30, types: types, pricing: await Pricing.load())
             var readings = await Providers.fetchAll(config.providers)
             readings = Providers.attachLocalCosts(
                 readings, enabled: config.providers.filter(\.enabled),
-                today: daily.mapValues { $0.first ?? 0 })
-            let history = Store.historyLines(daily)
+                today: CostScan.dailyTotals(spend, days: 1).mapValues { $0.first ?? 0 })
+            let history = Store.historyLines(CostScan.dailyTotals(spend, days: 30))
             print(json ? encode(config: config, readings: readings, history: history)
                        : render(config: config, readings: readings))
             exit(0)

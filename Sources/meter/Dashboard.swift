@@ -72,6 +72,30 @@ enum Dashboard {
             legend += "<b>\(entry.0)</b> $\(fmt2(entry.1)) <span class=\"muted\">(\(pctStr(entry.1, grand)))</span></li>"
         }
 
+        // attributed views: which repo and which model ate the budget
+        func attributionTable(_ title: String, _ note: String, _ rows: [Ledger.Attribution]) -> String {
+            guard !rows.isEmpty else { return "" }
+            let sum = rows.reduce(0) { $0 + $1.spent }
+            var body = ""
+            for row in rows {
+                let label = title == "By project" ? shortProject(row.label) : row.label
+                body += "<tr><td title=\"\(row.label)\">\(label)</td>"
+                body += "<td class=\"num\">$" + fmt2(row.spent) + "</td>"
+                body += "<td class=\"num muted\">" + tokens(row.tokens) + "</td>"
+                body += "<td class=\"num muted\">\(pctStr(row.spent, sum))</td></tr>"
+            }
+            return """
+            <h2 style="font-size:15px;margin:28px 0 0">\(title)</h2>
+            <div class="muted">\(note)</div>
+            <table><thead><tr><th>Name</th><th class="num">Spend</th><th class="num">Tokens</th><th class="num">Share</th></tr></thead>
+            <tbody>\(body)</tbody></table>
+            """
+        }
+        let projects = attributionTable("By project", "Grouped by the working directory recorded in each session.",
+                                        ledger.attribution(by: "project", from: from, to: fmt.string(from: today)))
+        let models = attributionTable("By model", "Spend is priced at list rates; free models show tokens only.",
+                                      ledger.attribution(by: "model", from: from, to: fmt.string(from: today)))
+
         var table = ""
         for day in axis.reversed() {
             let dayTotals = byDay[day] ?? [:]
@@ -137,10 +161,27 @@ enum Dashboard {
         <div class="chart">\(bars)</div>
         \(paceSection)
         <ul>\(legend)</ul>
+        \(projects)
+        \(models)
         <table><thead><tr><th>Day</th>\(heads)<th class="num">Total</th></tr></thead>
         <tbody>\(table)</tbody></table>
         </body></html>
         """
+    }
+
+    private static func tokens(_ count: Int) -> String {
+        switch count {
+        case 0: return "—"
+        case ..<1_000: return "\(count)"
+        case ..<1_000_000: return String(format: "%.1fK", Double(count) / 1_000)
+        default: return String(format: "%.1fM", Double(count) / 1_000_000)
+        }
+    }
+
+    /// "/Users/sami/dev/headout/payload" → "headout/payload"
+    private static func shortProject(_ path: String) -> String {
+        let parts = path.split(separator: "/").map(String.init)
+        return parts.count <= 2 ? path : parts.suffix(2).joined(separator: "/")
     }
 
     private static func fmt2(_ value: Double) -> String {

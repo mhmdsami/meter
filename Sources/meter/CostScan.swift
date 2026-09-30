@@ -1,10 +1,21 @@
 import Foundation
 
-/// Device-wide spend scans, bucketed per local calendar day. Each log file is
-/// parsed once per (mtime, size, price-table) stamp and yields every day's
-/// total, so today's row and the 7/30-day history share one pass instead of
-/// re-reading months of logs once per day-window.
+/// Device-wide spend scans. Each log file is parsed once per (mtime, size,
+/// price-table) stamp into per-day rows tagged with the project (cwd) and model
+/// the usage belonged to; day buckets, today's totals, the 7/30-day history and
+/// the ledger's breakdown all derive from that single pass.
 enum CostScan {
+    /// One attributed chunk of spend. `project` is a working directory ("" when
+    /// the source has none, e.g. the AI Gateway), `model` the pricing key.
+    struct Spend {
+        let day: Date
+        let project: String
+        let model: String
+        let spent: Double
+        /// total tokens (input + output + cache), so free-tier usage is still visible
+        var tokens: Int = 0
+    }
+
     static var startOfToday: Date {
         Calendar.current.startOfDay(for: Date())
     }
@@ -73,30 +84,59 @@ enum CostScan {
         return urls
     }
 
+    static func piURLs() -> [URL] {
+        var urls: [URL] = []
+        for root in ["~/.pi/agent/sessions", "~/.omp/agent/sessions"] {
+            let dir = URL(fileURLWithPath: NSString(string: root).expandingTildeInPath)
+            guard let en = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.isRegularFileKey]) else { continue }
+            for case let url as URL in en where url.pathExtension == "jsonl" {
+                urls.append(url)
+            }
+        }
+        return urls
+    }
+
+    static func fxURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".fx/usage.jsonl")
+    }
+
     // MARK: - opencode db (costs are precomputed $)
 
-    static func opencodeBuckets(windowStart: Date) -> [Date: Double] {
+    static func opencodeSpend(windowStart: Date) -> [Spend] {
         let db = ReadOnlyDB(path: NSString(string: "~/.local/share/opencode/opencode.db").expandingTildeInPath)
-        guard let db else { return [:] }
+        guard let db else { return [] }
         let sinceMs = Int64(windowStart.timeIntervalSince1970 * 1000)
+        // Group by the local date SQLite computes: bucketing on a truncated UTC hour
+        // would pull early-morning usage (00:00–05:30 IST) onto the previous day.
         let rows = db.rows("""
-            SELECT time_created/3600000 AS hour, SUM(json_extract(data,'$.cost')) AS total
+            SELECT date(time_created/1000,'unixepoch','localtime') AS day,
+                   json_extract(data,'$.path.cwd') AS cwd,
+                   json_extract(data,'$.modelID') AS model,
+                   SUM(json_extract(data,'$.cost')) AS total,
+                   SUM(COALESCE(json_extract(data,'$.tokens.input'),0)
+                     + COALESCE(json_extract(data,'$.tokens.output'),0)
+                     + COALESCE(json_extract(data,'$.tokens.cache.read'),0)
+                     + COALESCE(json_extract(data,'$.tokens.cache.write'),0)) AS tokens
             FROM message
             WHERE json_extract(data,'$.role')='assistant'
               AND json_extract(data,'$.providerID')='opencode-go'
               AND time_created >= \(sinceMs)
-            GROUP BY hour
+            GROUP BY day, cwd, model
             """)
-        var out: [Date: Double] = [:]
-        for row in rows {
-            guard let hour = ReadOnlyDB.num(row["hour"]),
-                  let total = ReadOnlyDB.num(row["total"]) else { continue }
-            out[day(Date(timeIntervalSince1970: hour * 3600)), default: 0] += total
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        return rows.compactMap { row in
+            guard let dayText = ReadOnlyDB.text(row["day"]),
+                  let parsed = fmt.date(from: dayText) else { return nil }
+            return Spend(day: parsed,
+                         project: ReadOnlyDB.text(row["cwd"]) ?? "",
+                         model: ReadOnlyDB.text(row["model"])?.split(separator: "/").last.map(String.init) ?? "",
+                         spent: ReadOnlyDB.num(row["total"]) ?? 0,
+                         tokens: Int(ReadOnlyDB.num(row["tokens"]) ?? 0))
         }
-        return out
     }
 
-    // MARK: - shared JSONL bucketing
+    // MARK: - shared JSONL scanning
 
     enum LogFormat { case codex, claude, vercel, pi }
 
@@ -112,12 +152,12 @@ enum CostScan {
         }
     }
 
-    private static var fileCache: [String: (Stamp, [Date: Double])] = [:]
+    private static var fileCache: [String: (Stamp, [Spend])] = [:]
     private static let cacheLock = NSLock()
 
-    static func buckets(urls: [URL], format: LogFormat, windowStart: Date, pricing: Pricing) -> [Date: Double] {
+    static func spend(urls: [URL], format: LogFormat, windowStart: Date, pricing: Pricing) -> [Spend] {
         let fm = FileManager.default
-        var out: [Date: Double] = [:]
+        var out: [Spend] = []
         for url in urls {
             guard let attrs = try? fm.attributesOfItem(atPath: url.path),
                   let mtime = attrs[.modificationDate] as? Date,
@@ -126,46 +166,81 @@ enum CostScan {
             cacheLock.lock()
             let hit = fileCache[url.path]
             cacheLock.unlock()
-            let parsed: [Date: Double]
+            let parsed: [Spend]
             if let hit, hit.0 == stamp {
                 parsed = hit.1
             } else {
                 guard let data = try? Data(contentsOf: url),
                       let text = String(data: data, encoding: .utf8) else { continue }
-                parsed = fileBuckets(text: text, format: format, pricing: pricing)
+                parsed = fileSpend(text: text, format: format, pricing: pricing,
+                                   fallbackProject: folderName(url))
                 cacheLock.lock()
                 fileCache[url.path] = (stamp, parsed)
                 cacheLock.unlock()
             }
-            for (dayStart, value) in parsed { out[dayStart, default: 0] += value }
+            out.append(contentsOf: parsed)
         }
         return out
     }
 
-    static func fileBuckets(text: String, format: LogFormat, pricing: Pricing) -> [Date: Double] {
-        switch format {
-        case .codex: return codexBuckets(text: text, pricing: pricing)
-        case .claude: return claudeBuckets(text: text, pricing: pricing)
-        case .vercel: return vercelBuckets(text: text, pricing: pricing)
-        case .pi: return piBuckets(text: text, pricing: pricing)
+    /// Day totals, used by the menu's today row and history bars.
+    static func buckets(urls: [URL], format: LogFormat, windowStart: Date, pricing: Pricing) -> [Date: Double] {
+        var out: [Date: Double] = [:]
+        for row in spend(urls: urls, format: format, windowStart: windowStart, pricing: pricing) {
+            out[row.day, default: 0] += row.spent
         }
+        return out
+    }
+
+    static func fileSpend(text: String, format: LogFormat, pricing: Pricing,
+                          fallbackProject: String = "") -> [Spend] {
+        switch format {
+        case .codex: return codexSpend(text: text, pricing: pricing)
+        case .claude: return claudeSpend(text: text, pricing: pricing, fallbackProject: fallbackProject)
+        case .vercel: return vercelSpend(text: text, pricing: pricing)
+        case .pi: return piSpend(text: text, pricing: pricing)
+        }
+    }
+
+    static func fileBuckets(text: String, format: LogFormat, pricing: Pricing) -> [Date: Double] {
+        var out: [Date: Double] = [:]
+        for row in fileSpend(text: text, format: format, pricing: pricing) {
+            out[row.day, default: 0] += row.spent
+        }
+        return out
+    }
+
+    private static func folderName(_ url: URL) -> String {
+        url.deletingLastPathComponent().lastPathComponent
     }
 
     private static func day(_ date: Date) -> Date {
         Calendar.current.startOfDay(for: date)
     }
 
-    // MARK: - multi-day history
+    // MARK: - multi-day totals
 
-    /// Per-type daily spend for the last `days` days (index 0 = today).
-    static func dailyTotals(days: Int, types: Set<String>, pricing: Pricing) -> [String: [Double]] {
+    /// Per-type attributed rows for the last `days` days (index 0 = today).
+    static func spendTotals(days: Int, types: Set<String>, pricing: Pricing) -> [String: [Spend]] {
         let cal = Calendar.current
         let windowStart = cal.date(byAdding: .day, value: -(days - 1), to: startOfToday)!
-        var out: [String: [Double]] = [:]
+        var out: [String: [Spend]] = [:]
         for source in Providers.LocalCostSource.all where types.contains(source.type) {
-            let buckets = source.buckets(pricing, windowStart)
-            out[source.type] = (0..<days).map { offset in
-                buckets[cal.date(byAdding: .day, value: -offset, to: startOfToday)!] ?? 0
+            out[source.type] = source.spend(pricing, windowStart)
+        }
+        return out
+    }
+
+    /// Collapse attributed rows into the per-type daily arrays the menu uses.
+    static func dailyTotals(_ spend: [String: [Spend]], days: Int) -> [String: [Double]] {
+        let cal = Calendar.current
+        let today = startOfToday
+        var out: [String: [Double]] = [:]
+        for (type, rows) in spend {
+            var byDay: [Date: Double] = [:]
+            for row in rows { byDay[row.day, default: 0] += row.spent }
+            out[type] = (0..<days).map { offset in
+                byDay[cal.date(byAdding: .day, value: -offset, to: today)!] ?? 0
             }
         }
         return out
@@ -175,15 +250,23 @@ enum CostScan {
 
     // Codex: token_count events carry session-CUMULATIVE totals; a day's spend is
     // its max total minus the max before that day started (counters are monotonic).
-    static func codexBuckets(text: String, pricing: Pricing) -> [Date: Double] {
-        struct Event { let ts: Date; var input: Double; var cached: Double; var output: Double }
+    // Attribution is per file: the session's cwd for the project and the model of
+    // the day's last turn (a session that switches models bills the day to the last).
+    static func codexSpend(text: String, pricing: Pricing) -> [Spend] {
+        struct Event { let ts: Date; let input: Double; let cached: Double; let output: Double; let model: String }
         var events: [Event] = []
-        var model: String?
+        var project = ""
+        var currentModel = ""
         eachLine(text) { obj in
             switch obj["type"] as? String {
+            case "session_meta":
+                if let payload = obj["payload"] as? [String: Any], let cwd = payload["cwd"] as? String {
+                    project = cwd
+                }
             case "turn_context":
-                if let payload = obj["payload"] as? [String: Any], let m = payload["model"] as? String {
-                    model = m
+                if let payload = obj["payload"] as? [String: Any] {
+                    if let m = payload["model"] as? String { currentModel = m }
+                    if project.isEmpty, let cwd = payload["cwd"] as? String { project = cwd }
                 }
             case "event_msg":
                 guard let payload = obj["payload"] as? [String: Any],
@@ -194,44 +277,65 @@ enum CostScan {
                 events.append(Event(ts: ts,
                                     input: num(t["input_tokens"]),
                                     cached: num(t["cached_input_tokens"]),
-                                    output: num(t["output_tokens"])))
+                                    output: num(t["output_tokens"]),
+                                    model: currentModel))
             default: break
             }
         }
-        guard !events.isEmpty, let model, let cost = pricing.cost(for: model) else { return [:] }
+        guard !events.isEmpty else { return [] }
         events.sort { $0.ts < $1.ts }
-        var out: [Date: Double] = [:]
+        var out: [Spend] = []
         var before: (Double, Double, Double) = (-1, -1, -1)
         var i = 0
         while i < events.count {
             let dayStart = day(events[i].ts)
             var maxIn: (Double, Double, Double) = (-1, -1, -1)
+            var dayModel = events[i].model
             while i < events.count, day(events[i].ts) == dayStart {
                 maxIn.0 = max(maxIn.0, events[i].input)
                 maxIn.1 = max(maxIn.1, events[i].cached)
                 maxIn.2 = max(maxIn.2, events[i].output)
+                if !events[i].model.isEmpty { dayModel = events[i].model }
                 i += 1
             }
+            defer {
+                before.0 = max(before.0, maxIn.0)
+                before.1 = max(before.1, maxIn.1)
+                before.2 = max(before.2, maxIn.2)
+            }
+            guard let cost = pricing.cost(for: dayModel) else { continue }
             func delta(_ value: Double, _ base: Double) -> Double {
                 value < 0 ? 0 : max(0, value - max(base, 0))
             }
-            out[dayStart, default: 0] += Pricing.dollars(
-                cost,
-                input: delta(maxIn.0, before.0),
-                cachedInput: delta(maxIn.1, before.1),
-                output: delta(maxIn.2, before.2))
-            before.0 = max(before.0, maxIn.0)
-            before.1 = max(before.1, maxIn.1)
-            before.2 = max(before.2, maxIn.2)
+            let input = delta(maxIn.0, before.0)
+            let cached = delta(maxIn.1, before.1)
+            let output = delta(maxIn.2, before.2)
+            let spent = Pricing.dollars(cost, input: input, cachedInput: cached, output: output)
+            let tokens = Int(input + output)
+            if spent > 0 || tokens > 0 {
+                out.append(Spend(day: dayStart, project: project, model: dayModel,
+                                 spent: spent, tokens: tokens))
+            }
+        }
+        return out
+    }
+
+    /// Codex spend: local rollout files plus subscription-billed usage routed
+    /// through the AI Gateway, which reports $0 for those models.
+    static func codexSourceSpend(windowStart: Date, pricing: Pricing) -> [Spend] {
+        var out = spend(urls: codexURLs(windowStart: windowStart), format: .codex,
+                        windowStart: windowStart, pricing: pricing)
+        if let data = try? Data(contentsOf: fxURL()), let text = String(data: data, encoding: .utf8) {
+            out.append(contentsOf: fxCodexSpend(text: text, pricing: pricing).filter { $0.day >= windowStart })
         }
         return out
     }
 
     // MARK: - Claude
 
-    // Claude: assistant lines carry per-message usage; dedupe streaming chunks
-    // by (id, requestId), price each message, bucket by its timestamp.
-    static func claudeBuckets(text: String, pricing: Pricing) -> [Date: Double] {
+    // Claude: assistant lines carry per-message usage and the session cwd; dedupe
+    // streaming chunks by (id, requestId), price each message, bucket by timestamp.
+    static func claudeSpend(text: String, pricing: Pricing, fallbackProject: String) -> [Spend] {
         struct Msg {
             var sum: Double
             var input: Double
@@ -240,9 +344,13 @@ enum CostScan {
             var output: Double
             var model: String
             var day: Date
+            var project: String
+            var tokens: Int
         }
         var best: [String: Msg] = [:]
+        var cwd = ""
         eachLine(text) { obj in
+            if let c = obj["cwd"] as? String, !c.isEmpty { cwd = c }
             guard obj["type"] as? String == "assistant",
                   let message = obj["message"] as? [String: Any],
                   let usage = message["usage"] as? [String: Any],
@@ -261,17 +369,20 @@ enum CostScan {
             let output = num(usage["output_tokens"])
             let sum = input + output + read + write
             if sum > (best[key]?.sum ?? -1) {
-                best[key] = Msg(sum: sum, input: input, read: read, write: write,
-                                output: output, model: (message["model"] as? String) ?? "", day: day(ts))
+                best[key] = Msg(sum: sum, input: input, read: read, write: write, output: output,
+                                model: (message["model"] as? String) ?? "", day: day(ts),
+                                project: cwd.isEmpty ? fallbackProject : cwd,
+                                tokens: Int(input + read + write + output))
             }
         }
-        var out: [Date: Double] = [:]
-        for msg in best.values {
-            guard msg.sum > 0, let cost = pricing.cost(for: msg.model) else { continue }
-            out[msg.day, default: 0] += Pricing.dollarsClaude(
-                cost, input: msg.input, cacheRead: msg.read, cacheWrite: msg.write, output: msg.output)
+        return best.values.compactMap { msg in
+            guard msg.sum > 0, let cost = pricing.cost(for: msg.model) else { return nil }
+            let spent = Pricing.dollarsClaude(cost, input: msg.input, cacheRead: msg.read,
+                                              cacheWrite: msg.write, output: msg.output)
+            guard spent > 0 || msg.tokens > 0 else { return nil }
+            return Spend(day: msg.day, project: msg.project, model: msg.model,
+                         spent: spent, tokens: msg.tokens)
         }
-        return out
     }
 
     // MARK: - Vercel AI Gateway (fx CLI log)
@@ -284,10 +395,6 @@ enum CostScan {
         let output: Double
         let model: String
         let day: Date
-    }
-
-    static func fxURL() -> URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".fx/usage.jsonl")
     }
 
     /// ~/.fx/usage.jsonl logs every generation with a precomputed total_cost; "pending"
@@ -316,58 +423,33 @@ enum CostScan {
         return Array(best.values)
     }
 
-    /// What the gateway actually charged: paid generations only. Subscription-billed
-    /// codex/* rows report $0 here and belong to the Codex row.
-    static func vercelBuckets(text: String, pricing: Pricing) -> [Date: Double] {
-        var out: [Date: Double] = [:]
-        for gen in fxGenerations(text: text) where gen.cost > 0 {
-            out[gen.day, default: 0] += gen.cost
-        }
-        return out
+    /// What the gateway actually charged: paid generations only.
+    static func vercelSpend(text: String, pricing: Pricing) -> [Spend] {
+        fxGenerations(text: text)
+            .filter { $0.cost > 0 && $0.day > .distantPast }
+            .map { Spend(day: $0.day, project: "", model: $0.model, spent: $0.cost,
+                         tokens: Int($0.input + $0.read + $0.output)) }
     }
 
-    /// Subscription-billed codex/* generations routed through the gateway report $0;
-    /// estimate them at list from the logged tokens (cached reads are a subset of input).
-    static func fxCodexBuckets(text: String, pricing: Pricing) -> [Date: Double] {
-        var out: [Date: Double] = [:]
-        for gen in fxGenerations(text: text) {
+    /// Subscription-billed codex/* generations report $0; estimate them at list
+    /// from the logged tokens (cached reads are a subset of input, Codex-style).
+    static func fxCodexSpend(text: String, pricing: Pricing) -> [Spend] {
+        fxGenerations(text: text).compactMap { gen in
+            let bare = String(gen.model.dropFirst("codex/".count))
             guard gen.cost == 0, gen.model.hasPrefix("codex/"),
-                  let cost = pricing.cost(for: String(gen.model.dropFirst("codex/".count))) else { continue }
-            out[gen.day, default: 0] += Pricing.dollars(cost, input: gen.input, cachedInput: gen.read, output: gen.output)
+                  let cost = pricing.cost(for: bare) else { return nil }
+            let spent = Pricing.dollars(cost, input: gen.input, cachedInput: gen.read, output: gen.output)
+            let tokens = Int(gen.input + gen.output)
+            guard spent > 0 || tokens > 0 else { return nil }
+            return Spend(day: gen.day, project: "", model: bare, spent: spent, tokens: tokens)
         }
-        return out
-    }
-
-    /// Codex spend: local rollout files plus subscription-billed usage that was
-    /// routed through the AI Gateway, which reports $0 for those models.
-    static func codexSourceBuckets(windowStart: Date, pricing: Pricing) -> [Date: Double] {
-        var out = buckets(urls: codexURLs(windowStart: windowStart), format: .codex,
-                          windowStart: windowStart, pricing: pricing)
-        if let data = try? Data(contentsOf: fxURL()), let text = String(data: data, encoding: .utf8) {
-            for (dayStart, value) in fxCodexBuckets(text: text, pricing: pricing) where dayStart >= windowStart {
-                out[dayStart, default: 0] += value
-            }
-        }
-        return out
     }
 
     // MARK: - pi / OMP agent sessions
 
-    static func piURLs() -> [URL] {
-        var urls: [URL] = []
-        for root in ["~/.pi/agent/sessions", "~/.omp/agent/sessions"] {
-            let dir = URL(fileURLWithPath: NSString(string: root).expandingTildeInPath)
-            guard let en = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.isRegularFileKey]) else { continue }
-            for case let url as URL in en where url.pathExtension == "jsonl" {
-                urls.append(url)
-            }
-        }
-        return urls
-    }
-
     /// pi: one assistant "message" row per turn with Claude-style usage; dedupe by
     /// message id and price at list (pi's own cost field is unreliable).
-    static func piBuckets(text: String, pricing: Pricing) -> [Date: Double] {
+    static func piSpend(text: String, pricing: Pricing) -> [Spend] {
         struct Msg {
             var sum: Double
             var input: Double
@@ -376,9 +458,13 @@ enum CostScan {
             var output: Double
             var model: String
             var day: Date
+            var project: String
+            var tokens: Int
         }
         var best: [String: Msg] = [:]
+        var cwd = ""
         eachLine(text) { obj in
+            if let c = obj["cwd"] as? String, !c.isEmpty { cwd = c }
             guard obj["type"] as? String == "message",
                   let message = obj["message"] as? [String: Any],
                   message["role"] as? String == "assistant",
@@ -392,24 +478,30 @@ enum CostScan {
             let sum = input + output + read + write
             if sum > (best[id]?.sum ?? -1) {
                 best[id] = Msg(sum: sum, input: input, read: read, write: write, output: output,
-                               model: (message["model"] as? String) ?? "", day: day(ts))
+                               model: bareModel((message["model"] as? String) ?? ""), day: day(ts),
+                               project: cwd, tokens: Int(input + read + write + output))
             }
         }
-        var out: [Date: Double] = [:]
-        for msg in best.values {
-            guard msg.sum > 0, let cost = piCost(for: msg.model, pricing: pricing) else { continue }
-            out[msg.day, default: 0] += Pricing.dollarsClaude(
-                cost, input: msg.input, cacheRead: msg.read, cacheWrite: msg.write, output: msg.output)
+        return best.values.compactMap { msg in
+            guard msg.sum > 0, let cost = piPricing(msg.model, pricing: pricing) else { return nil }
+            let spent = Pricing.dollarsClaude(cost, input: msg.input, cacheRead: msg.read,
+                                              cacheWrite: msg.write, output: msg.output)
+            guard spent > 0 || msg.tokens > 0 else { return nil }
+            return Spend(day: msg.day, project: msg.project, model: msg.model,
+                         spent: spent, tokens: msg.tokens)
         }
-        return out
     }
 
-    private static func piCost(for routedModel: String, pricing: Pricing) -> Pricing.ModelCost? {
+    /// "anthropic/claude-sonnet-5-thinking-medium" → "claude-sonnet-5" (the
+    /// pricing key, which is also what the leaderboard groups by).
+    static func bareModel(_ routedModel: String) -> String {
         let bare = routedModel.split(separator: "/").last.map(String.init) ?? routedModel
-        if let cost = pricing.cost(for: bare) { return cost }
-        // pi appends the thinking level: "claude-sonnet-5-thinking-medium" → base model
         return bare.range(of: #"-thinking-(?:off|minimal|low|medium|high|xhigh|max)$"#, options: .regularExpression)
-            .flatMap { pricing.cost(for: String(bare[..<$0.lowerBound])) }
+            .map { String(bare[..<$0.lowerBound]) } ?? bare
+    }
+
+    private static func piPricing(_ model: String, pricing: Pricing) -> Pricing.ModelCost? {
+        pricing.cost(for: model)
     }
 
     // MARK: - shared JSONL line iteration

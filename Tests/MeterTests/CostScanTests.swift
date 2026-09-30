@@ -104,16 +104,18 @@ final class CostScanTests: XCTestCase {
 
     func testFxPaidUsageStaysWithGateway() {
         let text = fxLine("g1", cost: 1.5, model: "openai/gpt-5.2", input: 1_000_000, output: 0)
-        let vercel = CostScan.vercelBuckets(text: text, pricing: pricing)
+        let vercel = CostScan.fileBuckets(text: text, format: .vercel, pricing: pricing)
         XCTAssertEqual(vercel[day("2026-02-02T00:00:00Z")] ?? -1, 1.5, accuracy: 0.0001)
-        XCTAssertTrue(CostScan.fxCodexBuckets(text: text, pricing: pricing).isEmpty)
+        XCTAssertTrue(CostScan.fxCodexSpend(text: text, pricing: pricing).isEmpty)
     }
 
     func testFxZeroCostCodexUsageBelongsToCodex() {
         // subscription-billed codex models report $0 and must not inflate the gateway row
         let text = fxLine("g1", cost: 0, model: "codex/gpt-5.2", input: 1_000_000, read: 0, output: 1_000_000)
-        XCTAssertTrue(CostScan.vercelBuckets(text: text, pricing: pricing).isEmpty)
-        let codex = CostScan.fxCodexBuckets(text: text, pricing: pricing)
+        XCTAssertTrue(CostScan.fileBuckets(text: text, format: .vercel, pricing: pricing).isEmpty)
+        let codexRows = CostScan.fxCodexSpend(text: text, pricing: pricing)
+        var codex: [Date: Double] = [:]
+        for row in codexRows { codex[row.day, default: 0] += row.spent }
         XCTAssertEqual(codex[day("2026-02-02T00:00:00Z")] ?? -1, 3.0, accuracy: 0.0001)
     }
 
@@ -191,5 +193,71 @@ final class CostScanTests: XCTestCase {
         let b = CostScan.buckets(urls: [url], format: .codex,
                                  windowStart: isoDate("2026-01-02T00:00:00Z")!, pricing: pricing)
         XCTAssertEqual(b, [:])
+    }
+}
+
+// MARK: - project / model attribution
+
+extension CostScanTests {
+    func testClaudeRowsCarryProjectAndModel() {
+        let text = """
+        {"type":"user","cwd":"/Users/me/dev/headout/payload","timestamp":"2026-01-02T09:00:00Z"}
+        {"type":"assistant","cwd":"/Users/me/dev/headout/payload","timestamp":"2026-01-02T09:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-sonnet-4-5","usage":{"input_tokens":1000000,"output_tokens":0}}}
+        """
+        let rows = CostScan.fileSpend(text: text, format: .claude, pricing: pricing)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].project, "/Users/me/dev/headout/payload")
+        XCTAssertEqual(rows[0].model, "claude-sonnet-4-5")
+        XCTAssertEqual(rows[0].spent, 3.0, accuracy: 0.0001)
+    }
+
+    func testClaudeFallsBackToFolderNameWithoutCwd() {
+        let text = """
+        {"type":"assistant","timestamp":"2026-01-02T09:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-sonnet-4-5","usage":{"input_tokens":1000000,"output_tokens":0}}}
+        """
+        let rows = CostScan.fileSpend(text: text, format: .claude, pricing: pricing,
+                                      fallbackProject: "-Users-me-dev-payload")
+        XCTAssertEqual(rows[0].project, "-Users-me-dev-payload")
+    }
+
+    func testCodexRowsCarrySessionProjectAndDayModel() {
+        let text = """
+        {"type":"session_meta","payload":{"cwd":"/Users/me/dev/headout/acq-helper"}}
+        {"type":"turn_context","payload":{"model":"gpt-5.2","cwd":"/Users/me/dev/headout/acq-helper"}}
+        \(codexLine("2026-01-02T12:00:00Z", input: 1_000_000, cached: 0, output: 0))
+        """
+        let rows = CostScan.fileSpend(text: text, format: .codex, pricing: pricing)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].project, "/Users/me/dev/headout/acq-helper")
+        XCTAssertEqual(rows[0].model, "gpt-5.2")
+        XCTAssertEqual(rows[0].spent, 1.0, accuracy: 0.0001)
+    }
+
+    func testPiRowsUseSessionCwdAndBareModel() {
+        let text = """
+        {"type":"session","version":3,"id":"abc","cwd":"/Users/me/dev/meter"}
+        \(piLine("2026-01-02T09:00:00Z", id: "m1", model: "anthropic/claude-sonnet-4-5-thinking-medium", input: 1_000_000, output: 0))
+        """
+        let rows = CostScan.fileSpend(text: text, format: .pi, pricing: pricing)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].project, "/Users/me/dev/meter")
+        XCTAssertEqual(rows[0].model, "claude-sonnet-4-5")
+        XCTAssertEqual(rows[0].spent, 3.0, accuracy: 0.0001)
+    }
+
+    func testVercePaidRowsHaveModelButNoProject() {
+        let text = fxLine("g1", cost: 2.0, model: "anthropic/claude-sonnet-4-5", input: 1_000_000, output: 0)
+        let rows = CostScan.fileSpend(text: text, format: .vercel, pricing: pricing)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].project, "")
+        XCTAssertEqual(rows[0].model, "anthropic/claude-sonnet-4-5")
+    }
+
+    func testDailyTotalsCollapseAttributedRows() {
+        let day = CostScan.startOfToday
+        let spend = ["claude": [CostScan.Spend(day: day, project: "/a", model: "m1", spent: 2),
+                                CostScan.Spend(day: day, project: "/b", model: "m1", spent: 3)]]
+        let daily = CostScan.dailyTotals(spend, days: 1)
+        XCTAssertEqual(daily["claude"]?.first ?? 0, 5.0, accuracy: 0.0001)
     }
 }

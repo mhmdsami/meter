@@ -74,7 +74,7 @@ enum Providers {
     /// one instance of its type, resolved by `LocalCostSource.target`.
     struct LocalCostSource {
         let type: String
-        let buckets: @Sendable (Pricing, Date) -> [Date: Double]
+        let spend: @Sendable (Pricing, Date) -> [CostScan.Spend]
         /// Which enabled instance owns the device-wide total. Codex, Claude and
         /// Vercel hold a single device-wide credential, so first enabled is the
         /// only correct answer; opencode matches the actively billed key.
@@ -82,30 +82,30 @@ enum Providers {
 
         static func firstEnabled(
             _ type: String,
-            _ buckets: @escaping @Sendable (Pricing, Date) -> [Date: Double]
+            _ spend: @escaping @Sendable (Pricing, Date) -> [CostScan.Spend]
         ) -> LocalCostSource {
-            .init(type: type, buckets: buckets,
+            .init(type: type, spend: spend,
                   target: { enabled in enabled.first { $0.type == type } })
         }
 
         static let all: [LocalCostSource] = [
             .firstEnabled("codex") { pricing, windowStart in
-                CostScan.codexSourceBuckets(windowStart: windowStart, pricing: pricing)
+                CostScan.codexSourceSpend(windowStart: windowStart, pricing: pricing)
             },
             .firstEnabled("claude") { pricing, windowStart in
-                CostScan.buckets(urls: CostScan.claudeURLs(),
-                                 format: .claude, windowStart: windowStart, pricing: pricing)
+                CostScan.spend(urls: CostScan.claudeURLs(), format: .claude,
+                               windowStart: windowStart, pricing: pricing)
             },
             .firstEnabled("vercel") { pricing, windowStart in
-                CostScan.buckets(urls: [CostScan.fxURL()],
-                                 format: .vercel, windowStart: windowStart, pricing: pricing)
+                CostScan.spend(urls: [CostScan.fxURL()], format: .vercel,
+                               windowStart: windowStart, pricing: pricing)
             },
             .firstEnabled("pi") { pricing, windowStart in
-                CostScan.buckets(urls: CostScan.piURLs(),
-                                 format: .pi, windowStart: windowStart, pricing: pricing)
+                CostScan.spend(urls: CostScan.piURLs(), format: .pi,
+                               windowStart: windowStart, pricing: pricing)
             },
             .init(type: "opencode",
-                  buckets: { _, windowStart in CostScan.opencodeBuckets(windowStart: windowStart) },
+                  spend: { _, windowStart in CostScan.opencodeSpend(windowStart: windowStart) },
                   target: { enabled in
                       let activeKey = OpenCode.activeAccountKey()
                       return enabled.first { inst in

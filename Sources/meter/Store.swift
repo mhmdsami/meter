@@ -150,17 +150,15 @@ final class Store: ObservableObject {
         // the 30-day history pass below reuses their cached parse
         let types = Set(config.providers.filter(\.enabled).map(\.type))
         let pricing = await Pricing.load()
-        let today = await Task.detached {
-            CostScan.dailyTotals(days: 1, types: types, pricing: pricing)
+        let spend = await Task.detached {
+            CostScan.spendTotals(days: 30, types: types, pricing: pricing)
         }.value
+        let today = CostScan.dailyTotals(spend, days: 1).mapValues { $0.first ?? 0 }
         readings = Providers.attachLocalCosts(
-            merged, enabled: config.providers.filter(\.enabled),
-            today: today.mapValues { $0.first ?? 0 })
+            merged, enabled: config.providers.filter(\.enabled), today: today)
         let snapshot = readings
         Task.detached { Self.persist(snapshot) }
-        let daily = await Task.detached {
-            CostScan.dailyTotals(days: 30, types: types, pricing: pricing)
-        }.value
+        let daily = CostScan.dailyTotals(spend, days: 30)
         history = Self.historyLines(daily)
         let enabled = config.providers.filter(\.enabled)
         let targets = Providers.costTargetNames(enabled: enabled)
@@ -168,16 +166,23 @@ final class Store: ObservableObject {
         let backfillNeeded = Ledger.shared.meta("backfilled") == nil
         let typesForBackfill = types
         let snapshotReadings = readings
+        let breakage = spend
         Task.detached {
             Ledger.shared.recordDaily(daily, targetNames: targets,
                                       pricingGen: gen, reported: Self.reportedProviders)
+            Ledger.shared.recordBreakdown(breakage, targetNames: targets,
+                                          pricingGen: gen, reported: Self.reportedProviders)
             if backfillNeeded {
                 // one-time: seed the ledger with longer history from the same scans
                 let widePricing = await Pricing.load()
-                let wide = CostScan.dailyTotals(days: 90, types: typesForBackfill, pricing: widePricing)
+                let wideSpend = CostScan.spendTotals(days: 90, types: typesForBackfill, pricing: widePricing)
+                let wide = CostScan.dailyTotals(wideSpend, days: 90)
                 Ledger.shared.recordDaily(wide, targetNames: targets,
                                           pricingGen: widePricing.generation,
                                           reported: Self.reportedProviders)
+                Ledger.shared.recordBreakdown(wideSpend, targetNames: targets,
+                                              pricingGen: widePricing.generation,
+                                              reported: Self.reportedProviders)
                 Ledger.shared.setMeta("backfilled", ISO8601DateFormatter().string(from: Date()))
             }
             Ledger.shared.recordQuotaSnapshots(snapshotReadings)

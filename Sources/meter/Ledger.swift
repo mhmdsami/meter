@@ -54,6 +54,20 @@ final class Ledger {
                 PRIMARY KEY (captured_at, provider, window_id)
             )
             """)
+        exec("""
+            CREATE TABLE IF NOT EXISTS breakdown (
+                day TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                project TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                spent REAL NOT NULL DEFAULT 0,
+                source TEXT NOT NULL DEFAULT 'estimated',
+                pricing_gen TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (day, provider, project, model)
+            )
+            """)
+        exec("ALTER TABLE breakdown ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0")
         exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
     }
 
@@ -95,6 +109,70 @@ final class Ledger {
         sqlite3_bind_int(stmt, 7, final ? 1 : 0)
         sqlite3_bind_text(stmt, 8, now, -1, sqliteTransient)
         sqlite3_step(stmt)
+    }
+
+    /// Attributed rows (project + model) behind the rollup. Rows are summed per
+    /// (day, project, model) first — the table's key would otherwise keep only the
+    /// last message's cost — then upserted, so a refresh replaces rather than adds.
+    func recordBreakdown(_ spend: [String: [CostScan.Spend]], targetNames: [String: String],
+                         pricingGen: Date, reported: Set<String>) {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let gen = ISO8601DateFormatter().string(from: pricingGen)
+        let now = ISO8601DateFormatter().string(from: Date())
+
+        struct Key: Hashable { let day: String; let provider: String; let project: String; let model: String }
+        var totals: [Key: (spent: Double, tokens: Int)] = [:]
+        for (provider, rows) in spend {
+            for row in rows where row.spent > 0 || row.tokens > 0 {
+                let key = Key(day: fmt.string(from: row.day), provider: provider,
+                              project: row.project, model: row.model)
+                let running = totals[key] ?? (0, 0)
+                totals[key] = (running.spent + row.spent, running.tokens + row.tokens)
+            }
+        }
+
+        lock.lock(); defer { lock.unlock() }
+        // Recompute, not patch: drop the (day, provider) rows we are about to write
+        // so a corrected attribution can't leave a stale model/project row behind.
+        var rewritten = Set<String>()
+        for key in totals.keys {
+            let group = key.day + "|" + key.provider
+            guard rewritten.insert(group).inserted else { continue }
+            var del: OpaquePointer?
+            if sqlite3_prepare_v2(handle, "DELETE FROM breakdown WHERE day = ? AND provider = ?", -1, &del, nil) == SQLITE_OK {
+                sqlite3_bind_text(del, 1, key.day, -1, sqliteTransient)
+                sqlite3_bind_text(del, 2, key.provider, -1, sqliteTransient)
+                sqlite3_step(del)
+                sqlite3_finalize(del)
+            }
+        }
+        for (key, total) in totals where total.spent > 0.004 || total.tokens > 0 {
+            var stmt: OpaquePointer?
+            let sql = """
+                INSERT INTO breakdown (day, provider, project, model, spent, tokens, source, pricing_gen, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(day, provider, project, model) DO UPDATE SET
+                    spent = excluded.spent,
+                    tokens = excluded.tokens,
+                    source = excluded.source,
+                    pricing_gen = excluded.pricing_gen,
+                    updated_at = excluded.updated_at
+                """
+            guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { continue }
+            sqlite3_bind_text(stmt, 1, key.day, -1, sqliteTransient)
+            sqlite3_bind_text(stmt, 2, key.provider, -1, sqliteTransient)
+            sqlite3_bind_text(stmt, 3, key.project, -1, sqliteTransient)
+            sqlite3_bind_text(stmt, 4, key.model, -1, sqliteTransient)
+            sqlite3_bind_double(stmt, 5, total.spent)
+            sqlite3_bind_int(stmt, 6, Int32(total.tokens))
+            sqlite3_bind_text(stmt, 7, reported.contains(key.provider) ? "reported" : "estimated", -1, sqliteTransient)
+            sqlite3_bind_text(stmt, 8, gen, -1, sqliteTransient)
+            sqlite3_bind_text(stmt, 9, now, -1, sqliteTransient)
+            sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+        }
+        _ = targetNames
     }
 
     func recordSnapshot(provider: String, windowID: String, usedPercent: Double?, resetsAt: Date?) {
@@ -233,6 +311,29 @@ final class Ledger {
 
     func markNotified(_ key: String) {
         setMeta(key, ISO8601DateFormatter().string(from: Date()))
+    }
+
+    struct Attribution {
+        let label: String
+        let spent: Double
+        let tokens: Int
+    }
+
+    /// Spend grouped by project or model over a window, biggest first.
+    func attribution(by dimension: String, from: String, to: String, limit: Int = 12) -> [Attribution] {
+        let column = dimension == "model" ? "model" : "project"
+        let db = ReadOnlyDB(path: url.path)
+        guard let db else { return [] }
+        return db.rows("""
+            SELECT \(column) AS label, SUM(spent) AS total, SUM(tokens) AS tokens FROM breakdown
+            WHERE day >= '\(from)' AND day <= '\(to)' AND \(column) != ''
+            GROUP BY label ORDER BY total DESC, tokens DESC LIMIT \(limit)
+            """).compactMap { row in
+            guard let label = ReadOnlyDB.text(row["label"]),
+                  let total = ReadOnlyDB.num(row["total"]) else { return nil }
+            return Attribution(label: label, spent: total,
+                               tokens: Int(ReadOnlyDB.num(row["tokens"]) ?? 0))
+        }
     }
 
     // MARK: - reads

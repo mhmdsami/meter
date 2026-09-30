@@ -50,6 +50,65 @@ final class LedgerTests: XCTestCase {
         XCTAssertEqual(rows.first { $0.day == yesterday }?.final, true)
     }
 
+    func testBreakdownRoundTripAndAttribution() {
+        let ledger = tempLedger()
+        let day = Calendar.current.startOfDay(for: Date())
+        let spend = ["claude": [
+            CostScan.Spend(day: day, project: "/Users/me/dev/headout/payload", model: "claude-sonnet-4-5", spent: 4),
+            CostScan.Spend(day: day, project: "/Users/me/dev/headout/kirby", model: "claude-opus-5", spent: 9),
+        ]]
+        ledger.recordBreakdown(spend, targetNames: [:], pricingGen: Date(), reported: [])
+
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let key = fmt.string(from: day)
+        let projects = ledger.attribution(by: "project", from: key, to: key)
+        XCTAssertEqual(projects.first?.label, "/Users/me/dev/headout/kirby")
+        XCTAssertEqual(projects.first?.spent ?? 0, 9, accuracy: 0.0001)
+        XCTAssertEqual(projects.count, 2)
+
+        let models = ledger.attribution(by: "model", from: key, to: key)
+        XCTAssertEqual(Set(models.map(\.label)), ["claude-opus-5", "claude-sonnet-4-5"])
+
+        // same key upserts instead of adding
+        ledger.recordBreakdown(spend, targetNames: [:], pricingGen: Date(), reported: [])
+        XCTAssertEqual(ledger.attribution(by: "project", from: key, to: key).count, 2)
+    }
+
+    func testBreakdownSumsRowsSharingAKey() {
+        let ledger = tempLedger()
+        let day = CostScan.startOfToday
+        // many messages share (day, provider, project, model): they must sum
+        let spend = ["claude": [
+            CostScan.Spend(day: day, project: "/p", model: "claude-sonnet-5", spent: 1),
+            CostScan.Spend(day: day, project: "/p", model: "claude-sonnet-5", spent: 2),
+            CostScan.Spend(day: day, project: "/p", model: "claude-sonnet-5", spent: 3),
+        ]]
+        ledger.recordBreakdown(spend, targetNames: [:], pricingGen: Date(), reported: [])
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let key = fmt.string(from: day)
+        let rows = ledger.attribution(by: "project", from: key, to: key)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].spent, 6.0, accuracy: 0.0001)
+    }
+
+    func testFreeModelWithTokensIsKept() {
+        let ledger = tempLedger()
+        let day = CostScan.startOfToday
+        let spend = ["opencode": [
+            CostScan.Spend(day: day, project: "/p", model: "union-alpha", spent: 0, tokens: 4_350_000),
+        ]]
+        ledger.recordBreakdown(spend, targetNames: [:], pricingGen: Date(), reported: [])
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let key = fmt.string(from: day)
+        let models = ledger.attribution(by: "model", from: key, to: key)
+        XCTAssertEqual(models.first?.label, "union-alpha")
+        XCTAssertEqual(models.first?.spent ?? -1, 0, accuracy: 0.0001)
+        XCTAssertEqual(models.first?.tokens, 4_350_000)
+    }
+
     func testMetaRoundTrip() {
         let ledger = tempLedger()
         XCTAssertNil(ledger.meta("backfilled"))
