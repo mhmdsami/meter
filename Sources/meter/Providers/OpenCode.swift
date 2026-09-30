@@ -2,15 +2,19 @@ import Foundation
 
 enum OpenCode {
     static func fetch(_ instance: ProviderInstance) async throws -> InstanceReading {
-        // key rotated out-of-band: drop the cached keychain copy and retry once
+        // key rotated out-of-band: drop whatever copy we cached and retry once
         let ref = instance.key ?? instance.name
         return try await retryingOn401(
             invalidate: {
-                if !ref.hasPrefix("env:"), !ref.hasPrefix("auth:") {
+                if ref.hasPrefix("env:") {
+                    Secrets.invalidateShellEnv()
+                } else if !ref.hasPrefix("auth:") {
                     Keychain.invalidateGeneric(service: "meter/\(ref)")
                 }
             },
-            staleMessage: "key rejected after re-read — update meter/\(ref) with the new key"
+            staleMessage: ref.hasPrefix("env:")
+                ? "key rejected — is \(ref.dropFirst(4)) current? (checked launchd env + login shell)"
+                : "key rejected after re-read — update meter/\(ref) with the new key"
         ) {
             try await fetchWithKey(instance)
         }

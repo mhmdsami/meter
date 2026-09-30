@@ -150,6 +150,13 @@ enum Secrets {
     private static var shellEnvCache: [String: String]?
     private static let envLock = NSLock()
 
+    /// An `env:` key that is rejected can be a rotation, not a bad value: the
+    /// shell env is cached per launch, so drop it and let the retry re-read.
+    static func invalidateShellEnv() {
+        envLock.lock(); defer { envLock.unlock() }
+        shellEnvCache = nil
+    }
+
     static func shellEnv() -> [String: String] {
         envLock.lock(); defer { envLock.unlock() }
         if let shellEnvCache { return shellEnvCache }
