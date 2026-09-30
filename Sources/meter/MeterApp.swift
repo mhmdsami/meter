@@ -1,24 +1,6 @@
+import AppKit
 import SwiftUI
 import Combine
-
-@main
-struct MeterApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-
-    init() {
-        if PrintMode.requested {
-            PrintMode.runAndExit()
-        }
-    }
-
-    // Menu bar chrome is AppKit (NSStatusItem + NSPopover): SwiftUI's MenuBarExtra
-    // window style draws an internal panel whose rounded mask (a private
-    // _cornerMask) stops being applied once the content is tall enough for the
-    // panel to be clamped near the screen edge. A popover keeps standard chrome.
-    var body: some Scene {
-        Settings { EmptyView() }
-    }
-}
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
