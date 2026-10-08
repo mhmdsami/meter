@@ -25,15 +25,12 @@ enum CostScan {
     static func codexURLs(windowStart: Date) -> [URL] {
         let sessionsDir = NSString(string: "~/.codex/sessions").expandingTildeInPath
         let cal = Calendar.current
+        let utc = TimeZone(identifier: "UTC")!
         var urls: [URL] = []
         // resumed threads keep appending to the rollout file of their start day,
         // so scan every UTC day dir back to the window; untouched files are
         // skipped by mtime and the cumulative-delta logic splits days correctly
-        let utc = TimeZone(identifier: "UTC")!
-        let back = (cal.dateComponents([.day], from: cal.dateComponents(in: utc, from: windowStart),
-                                      to: cal.dateComponents(in: utc, from: Date())).day ?? 0) + 2
-        for offset in 0..<max(2, back) {
-            guard let d = cal.date(byAdding: .day, value: -offset, to: windowStart) else { continue }
+        for d in codexDayDates(windowStart: windowStart) {
             let comps = cal.dateComponents(in: utc, from: d)
             guard let y = comps.year, let m = comps.month, let day = comps.day else { continue }
             let dir = URL(fileURLWithPath: sessionsDir).appendingPathComponent(String(format: "%04d/%02d/%02d", y, m, day))
@@ -47,6 +44,18 @@ enum CostScan {
             urls.append(contentsOf: files.filter { $0.pathExtension == "jsonl" })
         }
         return urls
+    }
+
+    /// UTC day dirs from today back to the window start (inclusive). Walking back
+    /// from `windowStart` instead would only ever visit older days.
+    static func codexDayDates(windowStart: Date, now: Date = Date()) -> [Date] {
+        let cal = Calendar.current
+        let utc = TimeZone(identifier: "UTC")!
+        let days = (cal.dateComponents([.day], from: cal.dateComponents(in: utc, from: windowStart),
+                                      to: cal.dateComponents(in: utc, from: now)).day ?? 0) + 2
+        return (0..<max(2, days)).compactMap { offset in
+            cal.date(byAdding: .day, value: -offset, to: now)
+        }
     }
 
     static func claudeURLs() -> [URL] {
@@ -290,12 +299,14 @@ enum CostScan {
         while i < events.count {
             let dayStart = day(events[i].ts)
             var maxIn: (Double, Double, Double) = (-1, -1, -1)
-            var dayModel = events[i].model
+            var dayModels: [String] = []
             while i < events.count, day(events[i].ts) == dayStart {
                 maxIn.0 = max(maxIn.0, events[i].input)
                 maxIn.1 = max(maxIn.1, events[i].cached)
                 maxIn.2 = max(maxIn.2, events[i].output)
-                if !events[i].model.isEmpty { dayModel = events[i].model }
+                if !events[i].model.isEmpty, dayModels.last != events[i].model {
+                    dayModels.append(events[i].model)
+                }
                 i += 1
             }
             defer {
@@ -303,7 +314,10 @@ enum CostScan {
                 before.1 = max(before.1, maxIn.1)
                 before.2 = max(before.2, maxIn.2)
             }
-            guard let cost = pricing.cost(for: dayModel) else { continue }
+            // Subagent labels like "codex-auto-review" carry no price, and the
+            // counters are session-wide, so bill the day to the last priced model.
+            guard let dayModel = dayModels.reversed().first(where: { pricing.cost(for: $0) != nil }),
+                  let cost = pricing.cost(for: dayModel) else { continue }
             func delta(_ value: Double, _ base: Double) -> Double {
                 value < 0 ? 0 : max(0, value - max(base, 0))
             }

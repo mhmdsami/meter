@@ -47,6 +47,33 @@ final class CostScanTests: XCTestCase {
         XCTAssertEqual(b[day("2026-01-02T12:00:00Z")] ?? -1, 3.5, accuracy: 0.0001)
     }
 
+    func testCodexDayDatesCoverTodayAndWindow() {
+        let now = isoDate("2026-10-08T15:00:00Z")!
+        let windowStart = isoDate("2026-09-09T00:00:00Z")!
+        let dates = CostScan.codexDayDates(windowStart: windowStart, now: now)
+        // newest first, today included, and never older than the window start
+        XCTAssertEqual(dates.first.map { Calendar.current.startOfDay(for: $0) },
+                       Calendar.current.startOfDay(for: now))
+        XCTAssertGreaterThanOrEqual(dates.count, 31)
+        XCTAssertTrue(dates.allSatisfy { $0 <= now })
+        XCTAssertTrue(dates.allSatisfy { $0 >= windowStart.addingTimeInterval(-3 * 86_400) })
+    }
+
+    func testCodexBillsToLastPricedModelWhenLabelIsUnpriced() {
+        // a subagent label with no price must not zero the day
+        let text = """
+        {"type":"session_meta","payload":{"cwd":"/Users/me/dev/x"}}
+        {"type":"turn_context","payload":{"model":"gpt-5.2"}}
+        \(codexLine("2026-01-02T10:00:00Z", input: 1_000_000, cached: 0, output: 0))
+        {"type":"turn_context","payload":{"model":"codex-auto-review"}}
+        \(codexLine("2026-01-02T11:00:00Z", input: 2_000_000, cached: 0, output: 0))
+        """
+        let rows = CostScan.fileSpend(text: text, format: .codex, pricing: pricing)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].model, "gpt-5.2")
+        XCTAssertEqual(rows[0].spent, 2.0, accuracy: 0.0001)
+    }
+
     func testCodexUnknownModelCostsNothing() {
         let text = """
         {"type":"turn_context","payload":{"model":"mystery-model"}}
