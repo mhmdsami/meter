@@ -26,7 +26,8 @@ enum Providers {
         "vercel": VercelGateway.fetch,
         "antigravity": Antigravity.fetch,
         "amp": Amp.fetch,
-        "pi": Pi.fetch,
+        "cloudflare": Cloudflare.fetch,
+        "straitly": Straitly.fetch,
     ]
 
     /// Instance name each device-wide cost source currently attaches to, used as
@@ -88,20 +89,29 @@ enum Providers {
                   target: { enabled in enabled.first { $0.type == type } })
         }
 
+        /// pi records the vendor per message, so its spend joins the vendor's row
+        /// (anthropic → Claude, openai → Codex, google → Antigravity).
+        private static func piSpend(for provider: String, pricing: Pricing, windowStart: Date) -> [CostScan.Spend] {
+            CostScan.spend(urls: CostScan.piURLs(), format: .pi,
+                           windowStart: windowStart, pricing: pricing)
+                .filter { CostScan.vendorProvider(for: $0.model) == provider }
+        }
+
         static let all: [LocalCostSource] = [
             .firstEnabled("codex") { pricing, windowStart in
                 CostScan.codexSourceSpend(windowStart: windowStart, pricing: pricing)
+                    + piSpend(for: "codex", pricing: pricing, windowStart: windowStart)
             },
             .firstEnabled("claude") { pricing, windowStart in
                 CostScan.spend(urls: CostScan.claudeURLs(), format: .claude,
                                windowStart: windowStart, pricing: pricing)
+                    + piSpend(for: "claude", pricing: pricing, windowStart: windowStart)
+            },
+            .firstEnabled("antigravity") { pricing, windowStart in
+                piSpend(for: "antigravity", pricing: pricing, windowStart: windowStart)
             },
             .firstEnabled("vercel") { pricing, windowStart in
                 CostScan.spend(urls: [CostScan.fxURL()], format: .vercel,
-                               windowStart: windowStart, pricing: pricing)
-            },
-            .firstEnabled("pi") { pricing, windowStart in
-                CostScan.spend(urls: CostScan.piURLs(), format: .pi,
                                windowStart: windowStart, pricing: pricing)
             },
             .init(type: "opencode",

@@ -7,19 +7,25 @@ struct ProviderInstance: Codable, Identifiable, Equatable {
     var key: String?
     var cookie: String?
     var intervalMinutes: Int?
+    /// provider-specific settings (e.g. Cloudflare account_id / gateway_id)
+    var options: [String: String]?
 
     var id: String { name }
 
-    enum CodingKeys: String, CodingKey { case type, name, enabled, key, cookie, intervalMinutes = "interval_minutes" }
+    enum CodingKeys: String, CodingKey {
+        case type, name, enabled, key, cookie, options
+        case intervalMinutes = "interval_minutes"
+    }
 
     init(type: String, name: String, enabled: Bool = true, key: String? = nil,
-         cookie: String? = nil, intervalMinutes: Int? = nil) {
+         cookie: String? = nil, intervalMinutes: Int? = nil, options: [String: String]? = nil) {
         self.type = type
         self.name = name
         self.enabled = enabled
         self.key = key
         self.cookie = cookie
         self.intervalMinutes = intervalMinutes
+        self.options = options
     }
 
     init(from decoder: Decoder) throws {
@@ -30,6 +36,7 @@ struct ProviderInstance: Codable, Identifiable, Equatable {
         key = try c.decodeIfPresent(String.self, forKey: .key)
         cookie = try c.decodeIfPresent(String.self, forKey: .cookie)
         intervalMinutes = try c.decodeIfPresent(Int.self, forKey: .intervalMinutes)
+        options = try c.decodeIfPresent([String: String].self, forKey: .options)
     }
 }
 

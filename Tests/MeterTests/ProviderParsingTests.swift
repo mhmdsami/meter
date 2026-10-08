@@ -145,6 +145,19 @@ final class ProviderParsingTests: XCTestCase {
         XCTAssertEqual(r.windows[0].note, "free plan")
     }
 
+    func testStraitlyKeyMapping() {
+        let payload: [String: Any] = ["available_usd": 18.0349, "daily_cap_usd": 5.0,
+                                      "plan": ["tier": "starter", "rpm": 300]]
+        let r = Straitly.map(instance: instance, payload: payload)
+        XCTAssertEqual(r.balanceNote, "$18.03 left · daily cap $5")
+        XCTAssertNil(r.spendToday)
+    }
+
+    func testStraitlyKeyWithoutPlan() {
+        let r = Straitly.map(instance: instance, payload: ["available_usd": 0.5])
+        XCTAssertEqual(r.balanceNote, "$0.50 left")
+    }
+
     func testHideEmpty() {
         let readings = [
             InstanceReading(id: "a", type: "t", name: "a"),                    // nothing → hidden

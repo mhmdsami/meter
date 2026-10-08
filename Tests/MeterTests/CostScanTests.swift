@@ -253,6 +253,13 @@ extension CostScanTests {
         XCTAssertEqual(rows[0].model, "anthropic/claude-sonnet-4-5")
     }
 
+    func testVendorProviderMapping() {
+        XCTAssertEqual(CostScan.vendorProvider(for: "anthropic/claude-sonnet-5"), "claude")
+        XCTAssertEqual(CostScan.vendorProvider(for: "openai/gpt-5.6-sol"), "codex")
+        XCTAssertEqual(CostScan.vendorProvider(for: "google/gemini-3-pro"), "antigravity")
+        XCTAssertNil(CostScan.vendorProvider(for: "zai/glm-5.1"))
+    }
+
     func testDailyTotalsCollapseAttributedRows() {
         let day = CostScan.startOfToday
         let spend = ["claude": [CostScan.Spend(day: day, project: "/a", model: "m1", spent: 2),

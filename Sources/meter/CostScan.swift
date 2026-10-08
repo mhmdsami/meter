@@ -492,6 +492,17 @@ enum CostScan {
         }
     }
 
+    /// Pi sessions are priced per model, so their spend belongs on the row of the
+    /// vendor that served it rather than a Pi-only row.
+    static func vendorProvider(for model: String) -> String? {
+        switch model.split(separator: "/").first.map(String.init) ?? "" {
+        case "anthropic": return "claude"
+        case "openai": return "codex"
+        case "google", "google-vertex", "gemini": return "antigravity"
+        default: return nil
+        }
+    }
+
     /// "anthropic/claude-sonnet-5-thinking-medium" → "claude-sonnet-5" (the
     /// pricing key, which is also what the leaderboard groups by).
     static func bareModel(_ routedModel: String) -> String {

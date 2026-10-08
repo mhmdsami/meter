@@ -38,7 +38,8 @@ Sources/meter/
   SQLite.swift       thin readonly libsqlite3 wrapper
   PrintMode.swift    --print / --json / --dashboard one-shot modes
   MenuView.swift     dropdown rows, bars, countdowns
-  Providers/*.swift  one file per provider type
+  Providers/*.swift  one file per provider type (config `options` holds
+                      provider-specific settings, e.g. Cloudflare account/gateway)
 Tests/MeterTests/    XCTest, no host app
 ```
 

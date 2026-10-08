@@ -21,8 +21,9 @@ Built with SwiftUI and SwiftPM. Zero third-party dependencies. macOS 14+.
 | Antigravity | Gemini and Claude+GPT quota windows | local `agy` CLI, signed in |
 | Amp | free-tier daily meter, subscription pools, credit balance | reuses `amp` CLI login, or an API key |
 | Zed | edit-prediction usage, billing cycle | reuses Zed's keychain login |
-| Pi | today's cost from local pi/OMP session logs | nothing (sessions are local) |
 | Vercel | paid AI Gateway usage from the `fx` log | reuses `~/.fx/usage.jsonl` |
+| Straitly | key balance and plan (`/v1/key`); spend comes from the local scans | API key |
+| Cloudflare | today's requests, tokens, errors and billed cost per gateway | API token (`key`) plus account/gateway ids (`options` or `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_GATEWAY_ID`) |
 
 Cost estimates price local token counts at public API rates from
 models.dev, cached in `~/.cache/meter/models.json`. These are estimates
@@ -30,7 +31,8 @@ of what your subscription usage would cost at list price, not bills.
 The scans cover every source on the machine: Codex rollout files
 (including threads resumed across days and archived sessions), Claude
 project logs plus Claude Desktop's embedded stores, opencode's database,
-pi/OMP agent sessions, and the `fx` usage log. The AI Gateway reports $0
+pi/OMP agent sessions (attributed to the vendor of each model), and the `fx`
+usage log. The AI Gateway reports $0
 for subscription-billed Codex models, so those generations are priced
 from their logged tokens and counted as Codex spend, leaving only what
 the gateway actually billed on the Vercel row. OpenCode's local spend is attributed
@@ -133,6 +135,15 @@ The `key` field has three forms:
   uses `meter/<name>`.
 - `"interval_minutes"` overrides the global refresh cadence for one
   instance (useful for providers that rate-limit, like Claude).
+- `"options"` holds provider-specific settings, e.g. the Cloudflare gateway:
+
+```json
+{
+  "type": "cloudflare", "name": "Cloudflare AI",
+  "key": "env:CLOUDFLARE_AI_GATEWAY",
+  "options": { "account_id": "abc123", "gateway_id": "my-gateway" }
+}
+```
 
 Seed a keychain slot like this:
 
