@@ -90,6 +90,16 @@ cards, per-provider daily bars, a per-day table, and burn-rate estimates from
 the quota snapshots the app records each refresh. The menu's Dashboard button
 does the same thing.
 
+## Keychain
+
+Claude's usage comes from Claude Code's own keychain item. The first time meter
+reads it, macOS asks for permission — choose **Always Allow** and the app is added
+to that item's ACL, so later reads (including background refreshes, and after
+Claude Code rotates its token) are silent. If the grant is missing, background
+refreshes fail closed with "click Refresh and choose Always Allow" rather than
+prompting you unprompted. Zed's session is read the same way, and API-key
+providers never touch the keychain.
+
 ## Notifications
 
 Crossing a quota window (default 90%) or a daily spend threshold posts a macOS

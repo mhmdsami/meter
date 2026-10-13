@@ -6,20 +6,14 @@ enum Claude {
     static func fetch(_ instance: ProviderInstance) async throws -> InstanceReading {
         // an expired token gets a 429 from Anthropic, not a 401 — surface the real
         // problem instead of backing off on a bogus rate limit for hours
-        var creds = try loadCredentials()
+        let creds = try loadCredentials()
         if let expiry = creds.expiresAt, expiry <= Date() {
-            // our per-launch keychain copy may predate a `claude login`
-            Keychain.invalidateGeneric(service: keychainService)
-            creds = try loadCredentials()
-            if let expiry = creds.expiresAt, expiry <= Date() {
-                let when = DateFormatter.localizedString(from: expiry, dateStyle: .short, timeStyle: .short)
-                throw ProviderError.badResponse("Claude credentials expired \(when) — run `claude login`")
-            }
+            let when = DateFormatter.localizedString(from: expiry, dateStyle: .short, timeStyle: .short)
+            throw ProviderError.badResponse("Claude credentials expired \(when) — run `claude login`")
         }
-        // Claude Code rotates its access token; our per-launch keychain copy goes stale
         let obj = try await retryingOn401(
             invalidate: { Keychain.invalidateGeneric(service: keychainService) },
-            staleMessage: "token rejected after re-read — run `claude login`"
+            staleMessage: "Claude token rotated — click Refresh (choose Always Allow once)"
         ) {
             try await usage(token: creds.token)
         }
@@ -38,22 +32,48 @@ enum Claude {
         let expiresAt: Date?
     }
 
-    static func loadCredentials() throws -> Credentials {
-        var json: [String: Any]?
+    /// Credential sources, newest first is decided by the caller: the file and
+    /// Claude Code's keychain item. Reads are cached per launch, so an expired
+    /// cached read must be re-read rather than trusted — Claude Code rotates the
+    /// token underneath us while the agent keeps running.
+    private static func candidates() -> [Credentials] {
+        var out: [Credentials] = []
         if let data = try? Data(contentsOf: credsURL),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            json = obj
-        } else if let raw = Keychain.generic(service: keychainService),
-                  let data = raw.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            json = obj
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let creds = try? parse(obj) {
+            out.append(creds)
         }
-        guard let root = json else {
-            if Keychain.needsAuthorization {
-                throw ProviderError.missingKey("Claude keychain access needs approval — open the menu and click Refresh, then Allow")
-            }
-            throw ProviderError.badResponse("no Claude credentials — run `claude login`")
+        if let raw = Keychain.generic(service: keychainService),
+           let data = raw.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let creds = try? parse(obj) {
+            out.append(creds)
         }
+        return out
+    }
+
+    private static func usable(_ creds: [Credentials]) -> Credentials? {
+        creds.first { $0.expiresAt == nil || $0.expiresAt! > Date() }
+    }
+
+    static func loadCredentials() throws -> Credentials {
+        if let creds = usable(candidates()) { return creds }
+        // everything we can see is expired: drop the per-launch cache and re-read,
+        // in case the item rotated since it was cached
+        Keychain.invalidateGeneric(service: keychainService)
+        let retried = candidates()
+        if let creds = usable(retried) { return creds }
+        if let newest = retried.compactMap(\.expiresAt).max() {
+            let when = DateFormatter.localizedString(from: newest, dateStyle: .short, timeStyle: .short)
+            throw ProviderError.badResponse("Claude credentials expired \(when) — run `claude login`")
+        }
+        if Keychain.needsAuthorization {
+            throw ProviderError.missingKey("Claude keychain access needs approval — click Refresh and choose Always Allow")
+        }
+        throw ProviderError.badResponse("no Claude credentials — run `claude login`")
+    }
+
+    private static func parse(_ root: [String: Any]) throws -> Credentials {
         // 2.1.x keychain items may hold only mcpOAuth state
         let oauth = (root["claudeAiOauth"] as? [String: Any]) ?? root
         guard let access = oauth["accessToken"] as? String else {

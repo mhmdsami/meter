@@ -20,6 +20,12 @@ enum Keychain {
     /// set when a read failed because it would have required authorization
     private static var authorizationNeeded = false
 
+    /// True only while a user-initiated refresh is running.
+    static var interactionAllowed: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return allowInteraction
+    }
+
     static func setInteraction(_ allowed: Bool) {
         lock.lock(); defer { lock.unlock() }
         allowInteraction = allowed
