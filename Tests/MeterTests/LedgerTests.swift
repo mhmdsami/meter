@@ -109,6 +109,42 @@ final class LedgerTests: XCTestCase {
         XCTAssertEqual(models.first?.tokens, 4_350_000)
     }
 
+    func testRecentDailyTotalsIndexesTodayFirstAndSumsProviders() {
+        let ledger = tempLedger()
+        let cal = Calendar.current
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let today = cal.startOfDay(for: Date())
+        let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
+        ledger.record(day: fmt.string(from: today), provider: "claude", account: "C", spent: 2,
+                      source: "estimated", pricingGen: "g", final: false)
+        ledger.record(day: fmt.string(from: today), provider: "opencode", account: "O", spent: 0.5,
+                      source: "reported", pricingGen: "g", final: false)
+        ledger.record(day: fmt.string(from: yesterday), provider: "codex", account: "X", spent: 9,
+                      source: "estimated", pricingGen: "g", final: true)
+
+        let totals = ledger.recentDailyTotals(days: 3)
+        XCTAssertEqual(totals.count, 3)
+        XCTAssertEqual(totals[0], 2.5, accuracy: 0.0001) // today, summed across providers
+        XCTAssertEqual(totals[1], 9.0, accuracy: 0.0001) // yesterday
+        XCTAssertEqual(totals[2], 0.0, accuracy: 0.0001) // two days ago
+    }
+
+    func testTodayByProviderSumsPerProvider() {
+        let ledger = tempLedger()
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let today = fmt.string(from: Calendar.current.startOfDay(for: Date()))
+        ledger.record(day: today, provider: "claude", account: "C", spent: 31.09,
+                      source: "estimated", pricingGen: "g", final: false)
+        ledger.record(day: today, provider: "opencode", account: "O", spent: 0.21,
+                      source: "reported", pricingGen: "g", final: false)
+
+        let byProvider = ledger.todayByProvider()
+        XCTAssertEqual(byProvider["claude"] ?? 0, 31.09, accuracy: 0.0001)
+        XCTAssertEqual(byProvider["opencode"] ?? 0, 0.21, accuracy: 0.0001)
+    }
+
     func testMetaRoundTrip() {
         let ledger = tempLedger()
         XCTAssertNil(ledger.meta("backfilled"))

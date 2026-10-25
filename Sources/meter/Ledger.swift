@@ -346,6 +346,55 @@ final class Ledger {
         let final: Bool
     }
 
+    /// Device-wide daily totals for the last `days` days, index 0 = today. The
+    /// menu reads history from here so it survives logs pruned or never present
+    /// on this machine (e.g. usage imported from another box).
+    func recentDailyTotals(days: Int) -> [Double] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        guard let from = cal.date(byAdding: .day, value: -(days - 1), to: today) else {
+            return Array(repeating: 0, count: days)
+        }
+        let db = ReadOnlyDB(path: url.path)
+        guard let db else { return Array(repeating: 0, count: days) }
+        var byDay: [String: Double] = [:]
+        for row in db.rows("""
+            SELECT day, SUM(spent) AS total FROM daily
+            WHERE day >= '\(fmt.string(from: from))'
+            GROUP BY day
+            """) {
+            if let day = ReadOnlyDB.text(row["day"]), let total = ReadOnlyDB.num(row["total"]) {
+                byDay[day] = total
+            }
+        }
+        return (0..<days).map { offset in
+            guard let d = cal.date(byAdding: .day, value: -offset, to: today) else { return 0 }
+            return byDay[fmt.string(from: d)] ?? 0
+        }
+    }
+
+    /// Per-provider totals for today. The menu's today row reads this so imported
+    /// usage (and reported spend) shows even when the local logs are absent.
+    func todayByProvider() -> [String: Double] {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let db = ReadOnlyDB(path: url.path)
+        guard let db else { return [:] }
+        var out: [String: Double] = [:]
+        for row in db.rows("""
+            SELECT provider, SUM(spent) AS total FROM daily
+            WHERE day = '\(fmt.string(from: Date()))'
+            GROUP BY provider
+            """) {
+            if let provider = ReadOnlyDB.text(row["provider"]), let total = ReadOnlyDB.num(row["total"]) {
+                out[provider] = total
+            }
+        }
+        return out
+    }
+
     func days(from: String, to: String) -> [DayRow] {
         let db = ReadOnlyDB(path: url.path)
         guard let db else { return [] }

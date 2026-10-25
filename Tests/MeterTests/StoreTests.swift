@@ -1,0 +1,40 @@
+import XCTest
+@testable import meter
+
+final class StoreTests: XCTestCase {
+    func testHistoryDailyMergesScanAndLedgerWithoutDoubleCounting() {
+        // index 0 = today; scans are device-wide per provider, ledger is the day total
+        let scans = ["claude": [1.0, 2.0, 3.0], "opencode": [0.5, 0.0, 0.0]]
+        let ledger = [1.0, 5.0, 0.0]
+        let merged = Store.historyDaily(scans: scans, ledger: ledger)
+        // per day: max(scan sum, ledger) — the ledger already contains the scans
+        XCTAssertEqual(merged["total"], [1.5, 5.0, 3.0])
+    }
+
+    func testLedgerSpendSplitsCatchAllByRealProvider() {
+        let day = CostScan.startOfToday
+        let spend = [
+            "codex": [CostScan.Spend(day: day, project: "/p", model: "gpt", spent: 1,
+                                    provider: "openai-codex")],
+            "other": [
+                CostScan.Spend(day: day, project: "/p", model: "mercury-3", spent: 2,
+                               provider: "inception"),
+                CostScan.Spend(day: day, project: "/p", model: "foo", spent: 3,
+                               provider: "acme"),
+            ],
+        ]
+        let ledger = Store.ledgerSpend(spend)
+        XCTAssertNil(ledger["other"])                       // no catch-all bucket in the ledger
+        XCTAssertEqual(ledger["inception"]?.first?.model, "mercury-3")
+        XCTAssertEqual(ledger["acme"]?.first?.spent, 3)
+        XCTAssertEqual(ledger["codex"]?.first?.model, "gpt") // mapped rows untouched
+    }
+
+    func testMergeTodayPrefersLedgerAndKeepsNewerScan() {
+        let scans = ["opencode": 0.21]
+        let ledger = ["claude": 31.09, "opencode": 0.19]
+        let merged = Store.mergeToday(scans: scans, ledger: ledger)
+        XCTAssertEqual(merged["claude"] ?? 0, 31.09, accuracy: 0.0001) // imported, scan absent
+        XCTAssertEqual(merged["opencode"] ?? 0, 0.21, accuracy: 0.0001) // scan newer than ledger
+    }
+}

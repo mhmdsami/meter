@@ -99,6 +99,40 @@ final class Store: ObservableObject {
         return lines
     }
 
+    /// The menu's history arrays: the ledger is the durable source of truth
+    /// (imported history, pruned logs), while live scans cover days the ledger
+    /// has not recorded yet. Taking the larger per day never double-counts.
+    nonisolated static func historyDaily(scans: [String: [Double]], ledger: [Double]) -> [String: [Double]] {
+        var scanned = Array(repeating: 0.0, count: ledger.count)
+        for values in scans.values {
+            for i in 0..<min(scanned.count, values.count) {
+                scanned[i] += values[i]
+            }
+        }
+        return ["total": (0..<ledger.count).map { max(ledger[$0], scanned[$0]) }]
+    }
+
+    /// The menubar shows one "Other" row, but the ledger/dashboard should keep
+    /// the real provider. Split the "other" bucket back out by `Spend.provider`.
+    nonisolated static func ledgerSpend(_ spend: [String: [CostScan.Spend]]) -> [String: [CostScan.Spend]] {
+        guard let catchAll = spend["other"] else { return spend }
+        var out = spend
+        out.removeValue(forKey: "other")
+        for row in catchAll {
+            out[row.provider.isEmpty ? "other" : row.provider, default: []].append(row)
+        }
+        return out
+    }
+
+    /// Today's per-provider spend for the menu bar and rows: the ledger's value
+    /// (which already includes scans plus anything imported) wins; the live scan
+    /// covers the window before the ledger's first write.
+    nonisolated static func mergeToday(scans: [String: Double], ledger: [String: Double]) -> [String: Double] {
+        var out = ledger
+        for (type, value) in scans { out[type] = max(out[type] ?? 0, value) }
+        return out
+    }
+
     func startPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
@@ -153,34 +187,40 @@ final class Store: ObservableObject {
         let spend = await Task.detached {
             CostScan.spendTotals(days: 30, types: types, pricing: pricing)
         }.value
-        let today = CostScan.dailyTotals(spend, days: 1).mapValues { $0.first ?? 0 }
+        let todayScan = CostScan.dailyTotals(spend, days: 1).mapValues { $0.first ?? 0 }
+        let today = Self.mergeToday(scans: todayScan, ledger: Ledger.shared.todayByProvider())
         readings = Providers.attachLocalCosts(
             merged, enabled: config.providers.filter(\.enabled), today: today)
         let snapshot = readings
         Task.detached { Self.persist(snapshot) }
         let daily = CostScan.dailyTotals(spend, days: 30)
-        history = Self.historyLines(daily)
+        history = Self.historyLines(Self.historyDaily(scans: daily,
+                                                      ledger: Ledger.shared.recentDailyTotals(days: 30)))
         let enabled = config.providers.filter(\.enabled)
         let targets = Providers.costTargetNames(enabled: enabled)
         let gen = pricing.generation
         let backfillNeeded = Ledger.shared.meta("backfilled") == nil
         let typesForBackfill = types
         let snapshotReadings = readings
-        let breakage = spend
+        // ledger/dashboard keep the real provider behind "other"; the menubar row
+        // above stays aggregated, which is why this is separate from `daily`
+        let ledgerSpend = Self.ledgerSpend(spend)
+        let ledgerDaily = CostScan.dailyTotals(ledgerSpend, days: 30)
         Task.detached {
-            Ledger.shared.recordDaily(daily, targetNames: targets,
+            Ledger.shared.recordDaily(ledgerDaily, targetNames: targets,
                                       pricingGen: gen, reported: Self.reportedProviders)
-            Ledger.shared.recordBreakdown(breakage, targetNames: targets,
+            Ledger.shared.recordBreakdown(ledgerSpend, targetNames: targets,
                                           pricingGen: gen, reported: Self.reportedProviders)
             if backfillNeeded {
                 // one-time: seed the ledger with longer history from the same scans
                 let widePricing = await Pricing.load()
                 let wideSpend = CostScan.spendTotals(days: 90, types: typesForBackfill, pricing: widePricing)
-                let wide = CostScan.dailyTotals(wideSpend, days: 90)
+                let wideLedger = Self.ledgerSpend(wideSpend)
+                let wide = CostScan.dailyTotals(wideLedger, days: 90)
                 Ledger.shared.recordDaily(wide, targetNames: targets,
                                           pricingGen: widePricing.generation,
                                           reported: Self.reportedProviders)
-                Ledger.shared.recordBreakdown(wideSpend, targetNames: targets,
+                Ledger.shared.recordBreakdown(wideLedger, targetNames: targets,
                                               pricingGen: widePricing.generation,
                                               reported: Self.reportedProviders)
                 Ledger.shared.setMeta("backfilled", ISO8601DateFormatter().string(from: Date()))

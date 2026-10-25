@@ -25,8 +25,12 @@ enum PrintMode {
             var readings = await Providers.fetchAll(config.providers)
             readings = Providers.attachLocalCosts(
                 readings, enabled: config.providers.filter(\.enabled),
-                today: CostScan.dailyTotals(spend, days: 1).mapValues { $0.first ?? 0 })
-            let history = Store.historyLines(CostScan.dailyTotals(spend, days: 30))
+                today: Store.mergeToday(
+                    scans: CostScan.dailyTotals(spend, days: 1).mapValues { $0.first ?? 0 },
+                    ledger: Ledger.shared.todayByProvider()))
+            let history = Store.historyLines(Store.historyDaily(
+                scans: CostScan.dailyTotals(spend, days: 30),
+                ledger: Ledger.shared.recentDailyTotals(days: 30)))
             print(json ? encode(config: config, readings: readings, history: history)
                        : render(config: config, readings: readings))
             exit(0)
