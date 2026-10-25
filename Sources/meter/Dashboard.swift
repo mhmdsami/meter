@@ -91,8 +91,12 @@ enum Dashboard {
   .seg button.on { background: var(--accent); color: #fff; }
   .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 16px 0 6px; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; }
-  .chip { border: 1px solid var(--line); background: transparent; color: inherit; border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
-  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chip { border: 1px solid #8886; background: transparent; color: inherit; border-radius: 999px;
+          padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; opacity: .55; }
+  .chip.on { opacity: 1; background: #8882; border-color: #8888; }
+  .chip.off { opacity: .35; border-style: dashed; text-decoration: line-through; }
+  .chip.all { font-weight: 600; }
+  .chip.all.on { background: #2f5fce; border-color: #2f5fce; color: #fff; opacity: 1; }
   .chip .dot { margin-right: 6px; }
   input[type=search] { background: transparent; color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: inherit; min-width: 220px; }
   .cards { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 4px; }
@@ -108,13 +112,19 @@ enum Dashboard {
   .legend li { cursor: pointer; user-select: none; }
   .legend li.off { opacity: .35; text-decoration: line-through; }
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 6px; }
-  .limits { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
-  .limit { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
-  .limit .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-  .limit .pct { font-size: 20px; font-weight: 600; }
-  .track { height: 7px; border-radius: 4px; background: #8883; margin: 10px 0 8px; overflow: hidden; }
+  .limits { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .limit { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .limit-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .limit-head b { font-size: 14px; }
+  .limit-row { padding: 9px 0; border-top: 1px solid #8882; }
+  .limit-row:first-of-type { border-top: 0; padding-top: 4px; }
+  .limit-row-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .limit-row .pct { font-size: 15px; font-weight: 600; }
+  .track { height: 7px; border-radius: 4px; background: #8883; margin: 8px 0 6px; overflow: hidden; }
   .fill { height: 100%; border-radius: 4px; }
-  .limit .sub { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+  .sub { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+  .pager { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; }
+  .pager button:disabled { opacity: .3; cursor: default; }
   table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
   th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
   th { cursor: pointer; user-select: none; white-space: nowrap; }
@@ -169,6 +179,13 @@ enum Dashboard {
     <button class="link" id="csv">Download CSV</button>
   </div>
   <table id="dailyTable"></table>
+  <div class="pager">
+    <span class="muted" id="dailyCount"></span>
+    <span class="spacer"></span>
+    <button class="link" id="prevPage">← Prev</button>
+    <span class="muted" id="dailyPage"></span>
+    <button class="link" id="nextPage">Next →</button>
+  </div>
 </div>
 
 <div id="tip"></div>
@@ -184,6 +201,7 @@ RANGES.sort((a, b) => a - b);
 const state = {
   days: DATA.days, by: "model", hidden: new Set(), search: "",
   sortUsage: { key: "spent", dir: -1 }, sortDaily: { key: "day", dir: -1 },
+  pageDaily: 1, pageSizeDaily: 25,
 };
 
 const pad = n => String(n).padStart(2, "0");
@@ -260,8 +278,8 @@ function renderUsageBy() {
 
 function renderProviders() {
   const all = providers();
-  const chips = [`<button class="chip ${state.hidden.size ? "" : "on"}" data-provider="__all">All</button>`]
-    .concat(all.map((p, i) => `<button class="chip ${visible(p) ? "on" : ""}" data-provider="${esc(p)}">` +
+  const chips = [`<button class="chip all ${state.hidden.size ? "" : "on"}" data-provider="__all">All</button>`]
+    .concat(all.map((p, i) => `<button class="chip ${visible(p) ? "on" : "off"}" data-provider="${esc(p)}">` +
       `<span class="dot" style="background:${colorFor(p, i)}"></span>${esc(p)}</button>`));
   document.getElementById("providers").innerHTML = chips.join("");
 }
@@ -313,30 +331,44 @@ function renderSpend() {
 
 function renderLimits() {
   const pace = new Map((DATA.pace || []).map(p => [`${p.provider}|${p.window}`, p]));
-  const limits = (DATA.limits || [])
-    .filter(l => visible(l.provider) && (matches(l.provider) || matches(l.window)))
-    .sort((a, b) => (b.used || 0) - (a.used || 0));
+  const rows = (DATA.limits || [])
+    .filter(l => visible(l.provider) && (matches(l.provider) || matches(l.window)));
+  const grouped = new Map();
+  for (const l of rows) {
+    if (!grouped.has(l.provider)) grouped.set(l.provider, []);
+    grouped.get(l.provider).push(l);
+  }
+  const groups = [...grouped.entries()].map(([provider, windows]) => {
+    windows.sort((a, b) => (b.used || 0) - (a.used || 0));
+    return { provider, windows, top: Math.max(...windows.map(w => w.used || 0)) };
+  }).sort((a, b) => b.top - a.top || a.provider.localeCompare(b.provider));
+
   const el = document.getElementById("limits");
-  if (!limits.length) {
+  if (!groups.length) {
     el.innerHTML = `<div class="panel empty">No limit readings yet</div>`;
     return;
   }
-  el.innerHTML = limits.map(l => {
-    const used = l.used == null ? 0 : Math.max(0, Math.min(100, l.used));
-    const color = used >= 90 ? "#e0705f" : used >= 70 ? "#e0b35f" : "#5fbf8f";
-    const peak = l.peak == null ? "—" : `${Math.round(l.peak)}%`;
-    const p = pace.get(`${l.provider}|${l.window}`);
-    const rate = p ? (p.per_hour > 0 ? `+${p.per_hour.toFixed(1)}%/h` : "idle") : "";
-    const out = p && p.out_hours != null ? ` · out ${p.out_hours.toFixed(1)}h` : "";
-    const sub = [rate + out, `peak ${peak}`].filter(Boolean).join(" · ");
-    return `<div class="limit">
-      <div class="top"><span>${esc(l.provider)} <span class="tag">${esc(l.window)}</span></span>` +
-      `<span class="pct">${l.used == null ? "—" : Math.round(l.used) + "%"}</span></div>
-      <div class="track"><div class="fill" style="width:${used}%;background:${color}"></div></div>
-      <div class="sub"><span class="muted">resets ${l.resets_at ? countdown(l.resets_at) : "—"}</span>` +
-      `<span class="muted">${sub}</span></div>
-    </div>`;
-  }).join("");
+  el.innerHTML = groups.map(g => `
+    <div class="limit">
+      <div class="limit-head"><b>${esc(g.provider)}</b>` +
+      `<span class="muted">${g.windows.length} window${g.windows.length === 1 ? "" : "s"}</span></div>
+      ${g.windows.map(l => {
+        const used = l.used == null ? 0 : Math.max(0, Math.min(100, l.used));
+        const color = used >= 90 ? "#e0705f" : used >= 70 ? "#e0b35f" : "#5fbf8f";
+        const peak = l.peak == null ? "—" : `${Math.round(l.peak)}%`;
+        const p = pace.get(`${l.provider}|${l.window}`);
+        const rate = p ? (p.per_hour > 0 ? `+${p.per_hour.toFixed(1)}%/h` : "idle") : "";
+        const out = p && p.out_hours != null ? ` · out ${p.out_hours.toFixed(1)}h` : "";
+        const sub = [rate + out, `peak ${peak}`].filter(Boolean).join(" · ");
+        return `<div class="limit-row">
+          <div class="limit-row-top"><span>${esc(l.window)}</span>` +
+          `<span class="pct">${l.used == null ? "—" : Math.round(l.used) + "%"}</span></div>
+          <div class="track"><div class="fill" style="width:${used}%;background:${color}"></div></div>
+          <div class="sub"><span class="muted">resets ${l.resets_at ? countdown(l.resets_at) : "—"}</span>` +
+          `<span class="muted">${sub}</span></div>
+        </div>`;
+      }).join("")}
+    </div>`).join("");
 }
 
 function sortRows(rows, sort) {
@@ -384,15 +416,23 @@ function dailyRows() {
 
 function renderDaily() {
   const list = sortRows(dailyRows(), state.sortDaily);
+  const pages = Math.max(1, Math.ceil(list.length / state.pageSizeDaily));
+  state.pageDaily = Math.min(Math.max(1, state.pageDaily), pages);
+  const start = (state.pageDaily - 1) * state.pageSizeDaily;
+  const page = list.slice(start, start + state.pageSizeDaily);
   const arrow = k => state.sortDaily.key === k ? `<span class="arrow">${state.sortDaily.dir > 0 ? "▲" : "▼"}</span>` : "";
   const head = `<thead><tr><th data-sort="day">Day ${arrow("day")}</th><th data-sort="provider">Provider ${arrow("provider")}</th>` +
     `<th data-sort="account">Account ${arrow("account")}</th><th class="num" data-sort="spent">Spend ${arrow("spent")}</th>` +
     `<th data-sort="source">Source ${arrow("source")}</th></tr></thead>`;
-  const body = list.slice(0, 500).map(r =>
+  const body = page.map(r =>
     `<tr><td>${r.day}</td><td>${esc(r.provider)}</td><td class="muted">${esc(r.account)}</td>` +
     `<td class="num">${money(r.spent)}</td><td class="muted">${esc(r.source)}</td></tr>`).join("");
   document.getElementById("dailyTable").innerHTML = head +
     (body ? `<tbody>${body}</tbody>` : `<tbody><tr><td colspan="5" class="muted">No rows</td></tr></tbody>`);
+  document.getElementById("dailyCount").textContent = `${list.length} row${list.length === 1 ? "" : "s"}`;
+  document.getElementById("dailyPage").textContent = `page ${state.pageDaily} / ${pages}`;
+  document.getElementById("prevPage").disabled = state.pageDaily <= 1;
+  document.getElementById("nextPage").disabled = state.pageDaily >= pages;
 }
 
 function csvCell(value) {
@@ -434,6 +474,7 @@ document.getElementById("range").addEventListener("click", e => {
   const b = e.target.closest("button");
   if (!b) return;
   state.days = Number(b.dataset.days);
+  state.pageDaily = 1;
   renderAll();
 });
 document.getElementById("usageBy").addEventListener("click", e => {
@@ -450,6 +491,7 @@ document.getElementById("providers").addEventListener("click", e => {
   if (p === "__all") state.hidden.clear();
   else if (state.hidden.has(p)) state.hidden.delete(p);
   else state.hidden.add(p);
+  state.pageDaily = 1;
   renderAll();
 });
 document.getElementById("spendLegend").addEventListener("click", e => {
@@ -457,10 +499,12 @@ document.getElementById("spendLegend").addEventListener("click", e => {
   if (!li) return;
   const p = li.dataset.provider;
   if (state.hidden.has(p)) state.hidden.delete(p); else state.hidden.add(p);
+  state.pageDaily = 1;
   renderAll();
 });
 document.getElementById("search").addEventListener("input", e => {
   state.search = e.target.value.trim().toLowerCase();
+  state.pageDaily = 1;
   renderLimits();
   renderUsage();
   renderDaily();
@@ -477,6 +521,14 @@ document.getElementById("dailyTable").addEventListener("click", e => {
   if (!th) return;
   const k = th.dataset.sort;
   state.sortDaily = { key: k, dir: state.sortDaily.key === k ? -state.sortDaily.dir : (k === "day" ? -1 : 1) };
+  state.pageDaily = 1;
+  renderDaily();
+});
+document.getElementById("prevPage").addEventListener("click", () => {
+  if (state.pageDaily > 1) { state.pageDaily--; renderDaily(); }
+});
+document.getElementById("nextPage").addEventListener("click", () => {
+  state.pageDaily++;
   renderDaily();
 });
 document.getElementById("csv").addEventListener("click", downloadCSV);
