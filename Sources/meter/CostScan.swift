@@ -14,6 +14,9 @@ enum CostScan {
         let spent: Double
         /// total tokens (input + output + cache), so free-tier usage is still visible
         var tokens: Int = 0
+        /// billing provider id when the source records one (pi tags every message
+        /// with the provider that served it); "" for sources that don't.
+        var provider: String = ""
     }
 
     static var startOfToday: Date {
@@ -109,28 +112,33 @@ enum CostScan {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".fx/usage.jsonl")
     }
 
-    // MARK: - opencode db (costs are precomputed $)
+    // MARK: - opencode db (v2; costs are precomputed $)
 
-    static func opencodeSpend(windowStart: Date) -> [Spend] {
-        let db = ReadOnlyDB(path: NSString(string: "~/.local/share/opencode/opencode.db").expandingTildeInPath)
+    /// opencode v2 keeps per-assistant-message cost/tokens in `session_message.data`
+    /// and moved the project directory off the message onto `session_v2.directory`.
+    /// The pre-v2 `message` table is gone, so only the v2 schema is read.
+    static func opencodeSpend(windowStart: Date,
+                              dbPath: String = NSString(string: "~/.local/share/opencode/opencode.db").expandingTildeInPath) -> [Spend] {
+        let db = ReadOnlyDB(path: dbPath)
         guard let db else { return [] }
         let sinceMs = Int64(windowStart.timeIntervalSince1970 * 1000)
         // Group by the local date SQLite computes: bucketing on a truncated UTC hour
         // would pull early-morning usage (00:00–05:30 IST) onto the previous day.
         let rows = db.rows("""
-            SELECT date(time_created/1000,'unixepoch','localtime') AS day,
-                   json_extract(data,'$.path.cwd') AS cwd,
-                   json_extract(data,'$.modelID') AS model,
-                   SUM(json_extract(data,'$.cost')) AS total,
-                   SUM(COALESCE(json_extract(data,'$.tokens.input'),0)
-                     + COALESCE(json_extract(data,'$.tokens.output'),0)
-                     + COALESCE(json_extract(data,'$.tokens.cache.read'),0)
-                     + COALESCE(json_extract(data,'$.tokens.cache.write'),0)) AS tokens
-            FROM message
-            WHERE json_extract(data,'$.role')='assistant'
-              AND json_extract(data,'$.providerID')='opencode-go'
-              AND time_created >= \(sinceMs)
-            GROUP BY day, cwd, model
+            SELECT date(m.time_created/1000,'unixepoch','localtime') AS day,
+                   s.directory AS cwd,
+                   json_extract(m.data,'$.model.providerID') AS provider,
+                   json_extract(m.data,'$.model.id') AS model,
+                   SUM(json_extract(m.data,'$.cost')) AS total,
+                   SUM(COALESCE(json_extract(m.data,'$.tokens.input'),0)
+                     + COALESCE(json_extract(m.data,'$.tokens.output'),0)
+                     + COALESCE(json_extract(m.data,'$.tokens.cache.read'),0)
+                     + COALESCE(json_extract(m.data,'$.tokens.cache.write'),0)) AS tokens
+            FROM session_message m
+            JOIN session_v2 s ON s.id = m.session_id
+            WHERE m.type='assistant'
+              AND m.time_created >= \(sinceMs)
+            GROUP BY day, cwd, provider, model
             """)
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd"
@@ -141,7 +149,17 @@ enum CostScan {
                          project: ReadOnlyDB.text(row["cwd"]) ?? "",
                          model: ReadOnlyDB.text(row["model"])?.split(separator: "/").last.map(String.init) ?? "",
                          spent: ReadOnlyDB.num(row["total"]) ?? 0,
-                         tokens: Int(ReadOnlyDB.num(row["tokens"]) ?? 0))
+                         tokens: Int(ReadOnlyDB.num(row["tokens"]) ?? 0),
+                         provider: ReadOnlyDB.text(row["provider"]) ?? "")
+        }
+    }
+
+    /// opencode provider ids that belong to the OpenCode row; anything else
+    /// (e.g. a vendor you are testing, like "inception") falls to the catch-all.
+    static func opencodeProviderType(_ provider: String) -> String? {
+        switch provider {
+        case "opencode-go", "opencode": return "opencode"
+        default: return nil
         }
     }
 
@@ -474,6 +492,7 @@ enum CostScan {
             var day: Date
             var project: String
             var tokens: Int
+            var provider: String
         }
         var best: [String: Msg] = [:]
         var cwd = ""
@@ -493,7 +512,8 @@ enum CostScan {
             if sum > (best[id]?.sum ?? -1) {
                 best[id] = Msg(sum: sum, input: input, read: read, write: write, output: output,
                                model: bareModel((message["model"] as? String) ?? ""), day: day(ts),
-                               project: cwd, tokens: Int(input + read + write + output))
+                               project: cwd, tokens: Int(input + read + write + output),
+                               provider: (message["provider"] as? String) ?? "")
             }
         }
         return best.values.compactMap { msg in
@@ -502,16 +522,21 @@ enum CostScan {
                                               cacheWrite: msg.write, output: msg.output)
             guard spent > 0 || msg.tokens > 0 else { return nil }
             return Spend(day: msg.day, project: msg.project, model: msg.model,
-                         spent: spent, tokens: msg.tokens)
+                         spent: spent, tokens: msg.tokens, provider: msg.provider)
         }
     }
 
-    /// Pi sessions are priced per model, so their spend belongs on the row of the
-    /// vendor that served it rather than a Pi-only row.
-    static func vendorProvider(for model: String) -> String? {
-        switch model.split(separator: "/").first.map(String.init) ?? "" {
+    /// pi tags each message with the provider that served it ("straitly",
+    /// "openai-codex", "opencode-go", "openrouter", …). Map that to the meter
+    /// provider type that owns the row, so a session's spend lands where it was
+    /// actually billed instead of all on one router.
+    static func piProviderType(_ piProvider: String) -> String? {
+        switch piProvider {
+        case "straitly": return "straitly"
+        case "openai-codex", "openai": return "codex"
+        case "opencode-go", "opencode": return "opencode"
+        case "openrouter": return "openrouter"
         case "anthropic": return "claude"
-        case "openai": return "codex"
         case "google", "google-vertex", "gemini": return "antigravity"
         default: return nil
         }

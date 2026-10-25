@@ -10,6 +10,11 @@ let package = Package(
             path: "Sources/meter",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
-        .testTarget(name: "MeterTests", dependencies: ["meter"], path: "Tests/MeterTests")
+        .testTarget(
+            name: "MeterTests",
+            dependencies: ["meter"],
+            path: "Tests/MeterTests",
+            linkerSettings: [.linkedLibrary("sqlite3")]
+        )
     ]
 )

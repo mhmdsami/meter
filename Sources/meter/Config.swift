@@ -127,6 +127,30 @@ enum Secrets {
     static let opencodeAuthURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".local/share/opencode/auth.json")
 
+    static let opencodeDBURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".local/share/opencode/opencode.db")
+
+    /// opencode v2 moved credentials out of auth.json into opencode.db's
+    /// `credential` table (integration_id → {"type":"key","key":…}). Read that
+    /// store; callers fall back to auth.json for pre-v2 installs.
+    static func opencodeCredential(_ id: String, dbPath: String = Secrets.opencodeDBURL.path) -> String? {
+        let db = ReadOnlyDB(path: dbPath)
+        guard let db else { return nil }
+        let escaped = id.replacingOccurrences(of: "'", with: "''")
+        for row in db.rows("""
+            SELECT value FROM credential
+            WHERE integration_id = '\(escaped)'
+            ORDER BY active DESC, time_updated DESC
+            """) {
+            guard let text = ReadOnlyDB.text(row["value"]),
+                  let data = text.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let key = obj["key"] as? String else { continue }
+            return key
+        }
+        return nil
+    }
+
     /// key semantics:
     /// - "env:NAME"    → process env, falling back to the user's interactive shell env
     /// - "auth:<id>"   → ~/.local/share/opencode/auth.json entry
@@ -141,11 +165,13 @@ enum Secrets {
         }
         if ref.hasPrefix("auth:") {
             let id = String(ref.dropFirst(5))
+            if let key = opencodeCredential(id) { return key }
+            // pre-v2 opencode kept credentials in auth.json
             guard let data = try? Data(contentsOf: opencodeAuthURL),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let entry = json[id] as? [String: Any],
                   let k = entry["key"] as? String else {
-                throw ProviderError.missingKey("no auth:\(id) entry in opencode auth.json")
+                throw ProviderError.missingKey("no auth:\(id) entry in opencode credentials")
             }
             return k
         }

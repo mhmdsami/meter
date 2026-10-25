@@ -60,6 +60,8 @@ enum OpenCode {
     /// stale for months, so it is only a fallback.
     static func activeAccountKey() -> String? {
         let home = FileManager.default.homeDirectoryForCurrentUser
+        // v2 keeps the credential in opencode.db; auth.json/account.json are pre-v2
+        if let key = Secrets.opencodeCredential("opencode-go") { return key }
         if let data = try? Data(contentsOf: home.appendingPathComponent(".local/share/opencode/auth.json")),
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let entry = root["opencode-go"] as? [String: Any],

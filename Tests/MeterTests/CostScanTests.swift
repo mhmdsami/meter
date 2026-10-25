@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import meter
 
 final class CostScanTests: XCTestCase {
@@ -280,11 +281,22 @@ extension CostScanTests {
         XCTAssertEqual(rows[0].model, "anthropic/claude-sonnet-4-5")
     }
 
-    func testVendorProviderMapping() {
-        XCTAssertEqual(CostScan.vendorProvider(for: "anthropic/claude-sonnet-5"), "claude")
-        XCTAssertEqual(CostScan.vendorProvider(for: "openai/gpt-5.6-sol"), "codex")
-        XCTAssertEqual(CostScan.vendorProvider(for: "google/gemini-3-pro"), "antigravity")
-        XCTAssertNil(CostScan.vendorProvider(for: "zai/glm-5.1"))
+    func testPiProviderTypeMapping() {
+        XCTAssertEqual(CostScan.piProviderType("straitly"), "straitly")
+        XCTAssertEqual(CostScan.piProviderType("openai-codex"), "codex")
+        XCTAssertEqual(CostScan.piProviderType("opencode-go"), "opencode")
+        XCTAssertEqual(CostScan.piProviderType("openrouter"), "openrouter")
+        XCTAssertNil(CostScan.piProviderType("mystery-provider"))
+    }
+
+    func testPiRowsCarryTheirProvider() {
+        let text = """
+        {"type":"message","id":"m1","timestamp":"2026-01-02T09:00:00Z","message":{"role":"assistant","provider":"openai-codex","model":"openai/gpt-5.2","usage":{"input":1000000,"output":0}}}
+        """
+        let rows = CostScan.fileSpend(text: text, format: .pi, pricing: pricing)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].provider, "openai-codex")
+        XCTAssertEqual(CostScan.piProviderType(rows[0].provider), "codex")
     }
 
     func testDailyTotalsCollapseAttributedRows() {
@@ -293,5 +305,86 @@ extension CostScanTests {
                                 CostScan.Spend(day: day, project: "/b", model: "m1", spent: 3)]]
         let daily = CostScan.dailyTotals(spend, days: 1)
         XCTAssertEqual(daily["claude"]?.first ?? 0, 5.0, accuracy: 0.0001)
+    }
+}
+
+// MARK: - opencode v2 db
+
+extension CostScanTests {
+    private func makeOpencodeDB(_ statements: [String]) throws -> String {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meter-opencode-\(UUID().uuidString).db").path
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(path, &handle), SQLITE_OK)
+        defer { sqlite3_close(handle) }
+        for sql in statements {
+            XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK, sql)
+        }
+        return path
+    }
+
+    func testOpencodeV2AttributesSessionMessageCost() throws {
+        let ts = isoDate("2026-01-02T09:00:00Z")!
+        let ms = Int64(ts.timeIntervalSince1970 * 1000)
+        func assistant(_ id: String, seq: Int, provider: String, cost: Double) -> String {
+            """
+            INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+            VALUES ('\(id)','ses1','assistant',\(seq),\(ms),\(ms),
+              '{"model":{"id":"deepseek-v4.1-flash","providerID":"\(provider)"},"cost":\(cost),"tokens":{"input":1000,"output":200,"cache":{"read":100,"write":0}}}')
+            """
+        }
+        let path = try makeOpencodeDB([
+            """
+            CREATE TABLE session_v2 (id text PRIMARY KEY, project_id text NOT NULL, slug text NOT NULL,
+              directory text NOT NULL, version text NOT NULL, cost real DEFAULT 0 NOT NULL,
+              model text, time_created integer NOT NULL, time_updated integer NOT NULL)
+            """,
+            """
+            CREATE TABLE session_message (id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL,
+              seq integer NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)
+            """,
+            "INSERT INTO session_v2 (id, project_id, slug, directory, version, time_created, time_updated) VALUES ('ses1','p1','x','/Users/me/dev/proj','1',\(ms),\(ms))",
+            assistant("m1", seq: 1, provider: "opencode-go", cost: 0.5),
+            assistant("m2", seq: 2, provider: "opencode-go", cost: 0.25),
+            assistant("m3", seq: 3, provider: "anthropic", cost: 9.99),
+            "INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES ('u1','ses1','user',4,\(ms),\(ms),'{}')",
+        ])
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let rows = CostScan.opencodeSpend(windowStart: isoDate("2026-01-01T00:00:00Z")!, dbPath: path)
+        // every provider is returned and tagged; routing to a row happens in Providers
+        XCTAssertEqual(rows.count, 2)
+        let oc = try XCTUnwrap(rows.first { $0.provider == "opencode-go" })
+        XCTAssertEqual(oc.project, "/Users/me/dev/proj")
+        XCTAssertEqual(oc.model, "deepseek-v4.1-flash")
+        XCTAssertEqual(oc.spent, 0.75, accuracy: 0.0001)
+        XCTAssertEqual(oc.tokens, 2600) // (1000 in + 200 out + 100 cache read) × 2
+        XCTAssertEqual(Calendar.current.startOfDay(for: oc.day),
+                       Calendar.current.startOfDay(for: ts))
+        XCTAssertEqual(rows.first { $0.provider == "anthropic" }?.spent ?? -1, 9.99, accuracy: 0.0001)
+    }
+
+    func testOpencodeProviderTypeMapping() {
+        XCTAssertEqual(CostScan.opencodeProviderType("opencode-go"), "opencode")
+        XCTAssertEqual(CostScan.opencodeProviderType("opencode"), "opencode")
+        XCTAssertNil(CostScan.opencodeProviderType("inception")) // → catch-all
+    }
+
+    func testOpencodeV2IgnoresRowsBeforeWindow() throws {
+        let ts = isoDate("2026-01-02T09:00:00Z")!
+        let ms = Int64(ts.timeIntervalSince1970 * 1000)
+        let path = try makeOpencodeDB([
+            "CREATE TABLE session_v2 (id text PRIMARY KEY, project_id text NOT NULL, slug text NOT NULL, directory text NOT NULL, version text NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL)",
+            "CREATE TABLE session_message (id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL, seq integer NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)",
+            "INSERT INTO session_v2 (id, project_id, slug, directory, version, time_created, time_updated) VALUES ('ses1','p1','x','/p','1',\(ms),\(ms))",
+            """
+            INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+            VALUES ('m1','ses1','assistant',1,\(ms),\(ms),
+              '{"model":{"id":"m","providerID":"opencode-go"},"cost":5.0,"tokens":{"input":1,"output":1}}')
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        XCTAssertTrue(CostScan.opencodeSpend(windowStart: isoDate("2026-02-01T00:00:00Z")!, dbPath: path).isEmpty)
     }
 }
