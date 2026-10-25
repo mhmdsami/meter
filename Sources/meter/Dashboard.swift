@@ -201,7 +201,7 @@ RANGES.sort((a, b) => a - b);
 const state = {
   days: DATA.days, by: "model", hidden: new Set(), search: "",
   sortUsage: { key: "spent", dir: -1 }, sortDaily: { key: "day", dir: -1 },
-  pageDaily: 1, pageSizeDaily: 25,
+  pageDaily: 1, pageSizeDaily: 10,
 };
 
 const pad = n => String(n).padStart(2, "0");
@@ -247,7 +247,15 @@ const countdown = iso => {
 };
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-const providers = () => [...new Set(DATA.daily.map(r => r.provider))].sort();
+const WINDOW_ORDER = ["session", "rolling", "primary", "secondary", "weekly", "monthly", "orb", "free", "edits", "cap"];
+const windowRank = w => {
+  const i = WINDOW_ORDER.indexOf(String(w).toLowerCase());
+  return i === -1 ? WINDOW_ORDER.length : i;
+};
+const providers = () => [...new Set([
+  ...DATA.daily.map(r => r.provider),
+  ...(DATA.limits || []).map(l => l.provider),
+])].sort();
 const visible = p => !state.hidden.has(p);
 const inRange = r => r.day >= fromDay() && r.day <= DATA.to;
 const matches = text => !state.search || String(text || "").toLowerCase().includes(state.search);
@@ -321,7 +329,7 @@ function renderSpend() {
 
   const sums = all.map((p, i) => ({
     p, i, v: DATA.daily.filter(r => inRange(r) && r.provider === p).reduce((a, r) => a + (r.spent || 0), 0),
-  })).sort((a, b) => b.v - a.v);
+  })).filter(s => s.v > 0);
   const grand = sums.reduce((a, s) => a + s.v, 0) || 1;
   document.getElementById("spendLegend").innerHTML = sums.map(s =>
     `<li class="${visible(s.p) ? "" : "off"}" data-provider="${esc(s.p)}">` +
@@ -339,9 +347,9 @@ function renderLimits() {
     grouped.get(l.provider).push(l);
   }
   const groups = [...grouped.entries()].map(([provider, windows]) => {
-    windows.sort((a, b) => (b.used || 0) - (a.used || 0));
-    return { provider, windows, top: Math.max(...windows.map(w => w.used || 0)) };
-  }).sort((a, b) => b.top - a.top || a.provider.localeCompare(b.provider));
+    windows.sort((a, b) => windowRank(a.window) - windowRank(b.window) || a.window.localeCompare(b.window));
+    return { provider, windows };
+  }).sort((a, b) => a.provider.localeCompare(b.provider));
 
   const el = document.getElementById("limits");
   if (!groups.length) {
@@ -402,7 +410,7 @@ function renderUsage() {
     `<th class="num" data-sort="spent">Spend ${arrow("spent")}</th>` +
     `<th class="num" data-sort="tokens">Tokens ${arrow("tokens")}</th><th>Share</th></tr></thead>`;
   const body = list.slice(0, 25).map(v =>
-    `<tr><td title="${esc(v.label)}">${esc(short(v.label))} <span class="tag">${esc([...v.providers].join(" · "))}</span></td>` +
+    `<tr><td title="${esc(v.label)}">${esc(short(v.label))} <span class="tag">${esc([...v.providers].sort().join(" · "))}</span></td>` +
     `<td class="num">${money(v.spent)}</td><td class="num muted">${tokens(v.tokens)}</td>` +
     `<td style="width:180px"><div class="bar" style="width:${(v.spent / top) * 100}%"></div></td></tr>`).join("");
   document.getElementById("usageTable").innerHTML = head +
