@@ -297,7 +297,7 @@ enum Antigravity {
                 if let frac = worst {
                     let label: String
                     switch name {
-                    case let n where n.contains("Claude"): label = "Claude+GPT"
+                    case let n where n.contains("Claude"): label = "Others"
                     case let n where n.contains("Gemini"): label = "Gemini"
                     default: label = String(name.prefix(9))
                     }
