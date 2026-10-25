@@ -28,6 +28,7 @@ enum Providers {
         "amp": Amp.fetch,
         "cloudflare": Cloudflare.fetch,
         "straitly": Straitly.fetch,
+        "other": CatchAll.fetch,
     ]
 
     /// Instance name each device-wide cost source currently attaches to, used as
@@ -80,6 +81,8 @@ enum Providers {
         /// Vercel hold a single device-wide credential, so first enabled is the
         /// only correct answer; opencode matches the actively billed key.
         let target: @Sendable ([ProviderInstance]) -> ProviderInstance?
+        /// Hide the row while its total is ~zero (used by the catch-all).
+        var hideWhenZero: Bool = false
 
         static func firstEnabled(
             _ type: String,
@@ -89,12 +92,12 @@ enum Providers {
                   target: { enabled in enabled.first { $0.type == type } })
         }
 
-        /// pi records the vendor per message, so its spend joins the vendor's row
-        /// (anthropic → Claude, openai → Codex, google → Antigravity).
-        private static func piSpend(for provider: String, pricing: Pricing, windowStart: Date) -> [CostScan.Spend] {
+        /// pi tags each message with the provider that actually served it, so its
+        /// spend joins that provider's row rather than a single router row.
+        private static func piSpend(for type: String, pricing: Pricing, windowStart: Date) -> [CostScan.Spend] {
             CostScan.spend(urls: CostScan.piURLs(), format: .pi,
                            windowStart: windowStart, pricing: pricing)
-                .filter { CostScan.vendorProvider(for: $0.model) == provider }
+                .filter { CostScan.piProviderType($0.provider) == type }
         }
 
         static let all: [LocalCostSource] = [
@@ -110,12 +113,19 @@ enum Providers {
             .firstEnabled("antigravity") { pricing, windowStart in
                 piSpend(for: "antigravity", pricing: pricing, windowStart: windowStart)
             },
+            .firstEnabled("straitly") { pricing, windowStart in
+                piSpend(for: "straitly", pricing: pricing, windowStart: windowStart)
+            },
             .firstEnabled("vercel") { pricing, windowStart in
                 CostScan.spend(urls: [CostScan.fxURL()], format: .vercel,
                                windowStart: windowStart, pricing: pricing)
             },
             .init(type: "opencode",
-                  spend: { _, windowStart in CostScan.opencodeSpend(windowStart: windowStart) },
+                  spend: { pricing, windowStart in
+                      CostScan.opencodeSpend(windowStart: windowStart)
+                          .filter { CostScan.opencodeProviderType($0.provider) == "opencode" }
+                          + piSpend(for: "opencode", pricing: pricing, windowStart: windowStart)
+                  },
                   target: { enabled in
                       let activeKey = OpenCode.activeAccountKey()
                       return enabled.first { inst in
@@ -124,6 +134,19 @@ enum Providers {
                           return key == activeKey
                       } ?? enabled.first { $0.type == "opencode" }
                   }),
+            .init(type: "other",
+                  spend: { pricing, windowStart in
+                      // every pi/opencode provider no dedicated row claims; the
+                      // menubar aggregates these, the ledger splits them by provider
+                      let pi = CostScan.spend(urls: CostScan.piURLs(), format: .pi,
+                                              windowStart: windowStart, pricing: pricing)
+                          .filter { CostScan.piProviderType($0.provider) == nil }
+                      let oc = CostScan.opencodeSpend(windowStart: windowStart)
+                          .filter { CostScan.opencodeProviderType($0.provider) == nil }
+                      return pi + oc
+                  },
+                  target: { enabled in enabled.first { $0.type == "other" } },
+                  hideWhenZero: true),
         ]
     }
 
@@ -137,6 +160,7 @@ enum Providers {
         for source in LocalCostSource.all {
             guard let name = source.target(enabled)?.name,
                   let value = today[source.type] else { continue }
+            if source.hideWhenZero && value <= 0.004 { continue }
             if let idx = out.firstIndex(where: { $0.name == name }) {
                 out[idx].spendToday = value
             }

@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import meter
 
 final class ConfigTests: XCTestCase {
@@ -52,6 +53,56 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(pct, 46)
         XCTAssertNotNil(isoDate("2026-09-03T12:27:08.355Z"))
         XCTAssertNotNil(isoDate("2026-09-03T12:27:08Z"))
+    }
+
+    func testPiSpendTargetsEachProviderRow() {
+        // pi now routes by its own provider field, so every mapped row is a target
+        let enabled = [
+            ProviderInstance(type: "claude", name: "Claude"),
+            ProviderInstance(type: "codex", name: "Codex"),
+            ProviderInstance(type: "opencode", name: "OpenCode"),
+            ProviderInstance(type: "antigravity", name: "Antigravity"),
+            ProviderInstance(type: "straitly", name: "Straitly"),
+        ]
+        let names = Providers.costTargetNames(enabled: enabled)
+        for type in ["claude", "codex", "opencode", "antigravity", "straitly"] {
+            XCTAssertEqual(names[type], enabled.first { $0.type == type }?.name)
+        }
+    }
+
+    func testCatchAllRowAppearsOnlyWhenItHasSpend() {
+        let enabled = [ProviderInstance(type: "other", name: "Other")]
+        let readings = [InstanceReading(id: "Other", type: "other", name: "Other")]
+        XCTAssertEqual(Providers.costTargetNames(enabled: enabled)["other"], "Other")
+        // no unmapped usage → hidden; spend → shown
+        XCTAssertTrue(Providers.attachLocalCosts(readings, enabled: enabled,
+                                                 today: ["other": 0]).isEmpty)
+        XCTAssertEqual(Providers.attachLocalCosts(readings, enabled: enabled,
+                                                  today: ["other": 1.5]).first?.spendToday, 1.5)
+    }
+
+    func testUnmappedPiProviderFallsToCatchAll() {
+        // no dedicated row: pi's inception usage lands on the "other" catch-all
+        XCTAssertNil(CostScan.piProviderType("inception"))
+    }
+
+    func testOpencodeV2CredentialFromDB() throws {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meter-cred-\(UUID().uuidString).db").path
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(path, &handle), SQLITE_OK)
+        defer { sqlite3_close(handle) }
+        let sql = """
+        CREATE TABLE credential (id text PRIMARY KEY, integration_id text, label text NOT NULL,
+          value text NOT NULL, connector_id text, method_id text, active integer,
+          time_created integer NOT NULL, time_updated integer NOT NULL);
+        INSERT INTO credential (id, integration_id, label, value, active, time_created, time_updated)
+          VALUES ('c1','openrouter','OpenRouter','{"type":"api","key":"sk-or-test"}',1,1,1);
+        """
+        XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK)
+
+        XCTAssertEqual(Secrets.opencodeCredential("openrouter", dbPath: path), "sk-or-test")
+        XCTAssertNil(Secrets.opencodeCredential("anthropic", dbPath: path))
     }
 
     func testDueInstances() {
