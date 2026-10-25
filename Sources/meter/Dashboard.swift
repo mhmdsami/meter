@@ -90,6 +90,7 @@ enum Dashboard {
   .seg button { border: 0; background: transparent; color: inherit; padding: 6px 12px; font: inherit; cursor: pointer; }
   .seg button.on { background: var(--accent); color: #fff; }
   .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 16px 0 6px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; }
   .chip { border: 1px solid #8886; background: transparent; color: inherit; border-radius: 999px;
           padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; opacity: .55; }
@@ -147,8 +148,6 @@ enum Dashboard {
 
 <div class="controls">
   <div class="chips" id="providers"></div>
-  <span class="spacer"></span>
-  <input id="search" type="search" placeholder="Search model, project, day…">
 </div>
 
 <div class="cards" id="cards"></div>
@@ -164,18 +163,23 @@ enum Dashboard {
 
 <h2>Usage</h2>
 <div class="panel">
-  <div class="seg" id="usageBy">
-    <button data-by="model">By model</button>
-    <button data-by="project">By project</button>
+  <div class="toolbar">
+    <div class="seg" id="usageBy">
+      <button data-by="model">By model</button>
+      <button data-by="project">By project</button>
+    </div>
+    <span class="spacer"></span>
+    <input id="usageSearch" type="search" placeholder="Filter models…">
   </div>
   <table id="usageTable"></table>
 </div>
 
 <h2>Daily</h2>
 <div class="panel">
-  <div style="display:flex;align-items:center;gap:12px">
+  <div class="toolbar">
     <span class="muted">Raw rows</span>
     <span class="spacer"></span>
+    <input id="dailySearch" type="search" placeholder="Filter days, providers…">
     <button class="link" id="csv">Download CSV</button>
   </div>
   <table id="dailyTable"></table>
@@ -199,7 +203,7 @@ if (!RANGES.includes(DATA.days)) RANGES.push(DATA.days);
 RANGES.sort((a, b) => a - b);
 
 const state = {
-  days: DATA.days, by: "model", hidden: new Set(), search: "",
+  days: DATA.days, by: "model", hidden: new Set(), searchUsage: "", searchDaily: "",
   sortUsage: { key: "spent", dir: -1 }, sortDaily: { key: "day", dir: -1 },
   pageDaily: 1, pageSizeDaily: 10,
 };
@@ -258,7 +262,7 @@ const providers = () => [...new Set([
 ])].sort();
 const visible = p => !state.hidden.has(p);
 const inRange = r => r.day >= fromDay() && r.day <= DATA.to;
-const matches = text => !state.search || String(text || "").toLowerCase().includes(state.search);
+const matches = (text, query) => !query || String(text || "").toLowerCase().includes(query);
 
 function renderAll() {
   renderHeader();
@@ -282,6 +286,8 @@ function renderHeader() {
 function renderUsageBy() {
   document.querySelectorAll("#usageBy button").forEach(b =>
     b.classList.toggle("on", b.dataset.by === state.by));
+  const input = document.getElementById("usageSearch");
+  if (input) input.placeholder = state.by === "model" ? "Filter models…" : "Filter projects…";
 }
 
 function renderProviders() {
@@ -339,8 +345,7 @@ function renderSpend() {
 
 function renderLimits() {
   const pace = new Map((DATA.pace || []).map(p => [`${p.provider}|${p.window}`, p]));
-  const rows = (DATA.limits || [])
-    .filter(l => visible(l.provider) && (matches(l.provider) || matches(l.window)));
+  const rows = (DATA.limits || []).filter(l => visible(l.provider));
   const grouped = new Map();
   for (const l of rows) {
     if (!grouped.has(l.provider)) grouped.set(l.provider, []);
@@ -388,7 +393,8 @@ function sortRows(rows, sort) {
 }
 
 function usageRows() {
-  const rows = DATA.breakdown.filter(r => inRange(r) && visible(r.provider) && matches(r[state.by]));
+  const rows = DATA.breakdown.filter(r => inRange(r) && visible(r.provider) &&
+    matches(r[state.by], state.searchUsage));
   const labels = new Map();
   for (const r of rows) {
     const label = r[state.by] || "";
@@ -419,7 +425,8 @@ function renderUsage() {
 
 function dailyRows() {
   return DATA.daily.filter(r => inRange(r) && visible(r.provider) &&
-    (matches(r.day) || matches(r.provider) || matches(r.account)));
+    (matches(r.day, state.searchDaily) || matches(r.provider, state.searchDaily) ||
+     matches(r.account, state.searchDaily)));
 }
 
 function renderDaily() {
@@ -510,11 +517,13 @@ document.getElementById("spendLegend").addEventListener("click", e => {
   state.pageDaily = 1;
   renderAll();
 });
-document.getElementById("search").addEventListener("input", e => {
-  state.search = e.target.value.trim().toLowerCase();
-  state.pageDaily = 1;
-  renderLimits();
+document.getElementById("usageSearch").addEventListener("input", e => {
+  state.searchUsage = e.target.value.trim().toLowerCase();
   renderUsage();
+});
+document.getElementById("dailySearch").addEventListener("input", e => {
+  state.searchDaily = e.target.value.trim().toLowerCase();
+  state.pageDaily = 1;
   renderDaily();
 });
 document.getElementById("usageTable").addEventListener("click", e => {
