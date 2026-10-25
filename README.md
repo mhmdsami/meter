@@ -1,52 +1,15 @@
 # meter
 
-A macOS menu bar app that tracks AI usage and spend, with multiple named
-instances of the same provider. Three OpenCode accounts show up as three
-rows, not one.
+A macOS menu bar app for AI usage and spend. It tracks multiple named
+instances of the same provider, so three OpenCode accounts are three rows,
+not one.
 
-The bar shows total estimated spend today. The dropdown lists one row per
-instance: usage windows, reset countdowns, credit balances, and inline
-errors. No settings window; you edit a JSON file.
+The menu bar shows today's estimated spend. The dropdown lists one row per
+instance: quota windows with reset countdowns, credit balances, today's
+spend, and errors. There is no settings window; configuration is a JSON file.
+A local SQLite ledger records daily totals and powers a static HTML dashboard.
 
-Built with SwiftUI and SwiftPM. Zero third-party dependencies. macOS 14+.
-
-## What it reads
-
-| Provider | Data | Auth |
-|---|---|---|
-| OpenCode | Go plan windows (rolling/weekly/monthly), Zen credit balance | API key, or browser cookie for balance |
-| OpenRouter | credit balance, daily spend, per-key spending cap | API key |
-| Codex | session/weekly windows, today's cost from local session logs and gateway-routed subscription usage | reuses `~/.codex/auth.json`; falls back to `codex app-server` RPC when the token is stale |
-| Claude | session/weekly windows, today's cost from local project logs | reuses Claude Code credentials |
-| Antigravity | Gemini and Claude+GPT quota windows | local `agy` CLI, signed in |
-| Amp | free-tier daily meter, subscription pools, credit balance | reuses `amp` CLI login, or an API key |
-| Zed | edit-prediction usage, billing cycle | reuses Zed's keychain login |
-| Vercel | paid AI Gateway usage from the `fx` log | reuses `~/.fx/usage.jsonl` |
-| Straitly | key balance and plan (`/v1/key`); spend comes from the local scans | API key |
-| Cloudflare | today's requests, tokens, errors and billed cost per gateway | API token (`key`) plus account/gateway ids (`options` or `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_GATEWAY_ID`) |
-
-Cost estimates price local token counts at public API rates from
-models.dev, cached in `~/.cache/meter/models.json`. These are estimates
-of what your subscription usage would cost at list price, not bills.
-The scans cover every source on the machine: Codex rollout files
-(including threads resumed across days and archived sessions), Claude
-project logs plus Claude Desktop's embedded stores, opencode's database,
-pi/OMP agent sessions (attributed to the vendor of each model), and the `fx`
-usage log. The AI Gateway reports $0
-for subscription-billed Codex models, so those generations are priced
-from their logged tokens and counted as Codex spend, leaving only what
-the gateway actually billed on the Vercel row. OpenCode's local spend is attributed
-to whichever account its `auth.json` currently holds. The dropdown also
-sums the last 7 and 30 days from the same scans (sparkline included).
-Historical days price at today's models.dev table, and OpenCode's past
-days follow its currently active key. Instances with
-nothing to show are hidden.
-
-A few things it deliberately does not do: browser-cookie scraping for the
-Codex or Claude web dashboards, notifications, charts, widgets. Claude
-Org and OpenAI Admin cost reports need admin API keys, so they are not
-included. OpenCode Zen balances have no API-key path yet; balance rows
-can use a pasted session cookie.
+SwiftUI and SwiftPM, no third-party dependencies, macOS 14 or later.
 
 ## Install
 
@@ -54,162 +17,31 @@ can use a pasted session cookie.
 ./install.sh
 ```
 
-This builds `~/Applications/meter.app` (a menu bar app: `LSUIElement`, so no
-Dock icon) and loads the `app.meter.meter` LaunchAgent, which starts meter at
-login and restarts it if it crashes. `~/.local/bin/meter` symlinks to the
-bundle's executable, so the `--print`/`--json`/`--dashboard` modes work from a
-shell.
+This builds `~/Applications/meter.app` and loads the `app.meter.meter`
+LaunchAgent. The first run may ask for keychain access to credentials owned
+by Claude Code or Zed; choose **Always Allow**.
 
-On first run the script also creates a self-signed `meter codesign`
-certificate and signs the binary with it on every build. This matters:
-meter reuses credentials stored by other apps (Claude Code, Zed), and
-keychain grants are bound to the app's code signature. Without a stable
-signature, every rebuild would invalidate those grants and macOS would
-re-prompt for keychain access. Expect one "Always Allow" per foreign
-credential after the first install; after that, rebuilds are silent.
-
-Check everything from a terminal instead of the menu:
-
-```sh
-meter --print          # one refresh cycle, table to stdout
-meter --json           # same data as JSON, for scripts
-meter --dashboard      # render an HTML dashboard from the ledger and open it
-```
-
-## Usage history
-
-Every refresh writes day-by-day totals into a SQLite ledger at
-`~/.local/share/meter/usage.db` (one row per day per provider, upserted, so a
-refresh can never double-count). The first run backfills 90 days from the same
-local scans; after that only today is recomputed, and a day is frozen once it
-ends so later price-table changes cannot rewrite the past. Rows are tagged
-`reported` (the provider told us what it billed) or `estimated` (list price).
-
-`meter --dashboard` renders that ledger as a self-contained HTML page — spend
-cards, per-provider daily bars, a per-day table, and burn-rate estimates from
-the quota snapshots the app records each refresh. The menu's Dashboard button
-does the same thing.
-
-## Keychain
-
-Claude's usage comes from Claude Code's own keychain item. The first time meter
-reads it, macOS asks for permission — choose **Always Allow** and the app is added
-to that item's ACL, so later reads (including background refreshes, and after
-Claude Code rotates its token) are silent. If the grant is missing, background
-refreshes fail closed with "click Refresh and choose Always Allow" rather than
-prompting you unprompted. Zed's session is read the same way, and API-key
-providers never touch the keychain.
-
-## Notifications
-
-Crossing a quota window (default 90%) or a daily spend threshold posts a macOS
-notification — once per window cycle, once per day for spend. `meter
---test-notify` asks for permission and sends a test. Settings live in the
-config file:
-
-```json
-{
-  "notifications": { "enabled": true, "window_percent": 90, "daily_spend": 50 }
-}
-```
-
-Omit `daily_spend` to disable spend alerts. Notifications need the app bundle
-(`~/Applications/meter.app`); if you denied the prompt, re-enable it in System
-Settings → Notifications → meter.
-
-## Config
-
-`~/.config/meter/config.json`, created with a sample on first run:
-
-```json
-{
-  "interval_minutes": 5,
-  "providers": [
-    { "type": "opencode", "name": "OpenCode" },
-    { "type": "openrouter", "name": "OpenRouter" },
-    { "type": "codex", "name": "Codex" },
-    { "type": "claude", "name": "Claude" }
-  ]
-}
-```
-
-Each entry is an instance. `type` picks the fetcher, `name` is the label
-and must be unique. Repeat a type as many times as you like.
-
-The `key` field has three forms:
-
-- `"env:NAME"` reads an environment variable. If launchd doesn't have it,
-  meter asks your interactive shell, so variables in `~/.zshrc` work.
-- `"auth:<id>"` reads one entry of `~/.local/share/opencode/auth.json`.
-- Anything else names a keychain item, `meter/<value>`. Omit `key` and it
-  uses `meter/<name>`.
-- `"interval_minutes"` overrides the global refresh cadence for one
-  instance (useful for providers that rate-limit, like Claude).
-- `"options"` holds provider-specific settings, e.g. the Cloudflare gateway:
-
-```json
-{
-  "type": "cloudflare", "name": "Cloudflare AI",
-  "key": "env:CLOUDFLARE_AI_GATEWAY",
-  "options": { "account_id": "abc123", "gateway_id": "my-gateway" }
-}
-```
-
-Seed a keychain slot like this:
-
-```sh
-security add-generic-password -s meter/OpenRouter -a $USER -w
-```
-
-Read one back (after a possible keychain prompt) with:
-
-```sh
-security find-generic-password -s meter/OpenRouter -w
-```
-
-API-key providers that reuse CLI credentials (codex, claude, antigravity,
-amp, zed) need no key at all.
-
-OpenCode Zen balances use a web RPC that only accepts a browser session,
-so an instance needs a `cookie` field for its balance row to appear. Copy
-the `Cookie:` header of any request to opencode.ai in your browser's dev
-tools and paste it. The row disappears quietly when the cookie expires.
-
-After editing config, quit and relaunch meter, or run:
+Then edit `~/.config/meter/config.json` to choose your providers, and restart:
 
 ```sh
 launchctl kickstart -k gui/$(id -u)/app.meter.meter
 ```
 
-A 429 from any provider arms an automatic backoff (honoring `Retry-After`,
-minimum 60s): the instance keeps its last reading and skips cycles until
-the window passes, instead of hammering the endpoint.
+See [docs/install.md](docs/install.md) for the details.
 
-## Adding a provider
-
-A provider is one file in `Sources/meter/Providers/` and one line in the
-registry at the top of `Providers.swift`. A fetcher receives a configured
-instance and returns an `InstanceReading`: usage windows with percentages
-and reset dates, an optional balance note, and an optional today cost.
-Errors are thrown; the menu shows them inline per instance.
-
-Read `Providers/OpenRouter.swift` for the shortest complete example.
-The tests in `Tests/MeterTests/` cover config decoding and window
-formatting; add a fixture test for any parser you write.
-
-## Development
+## Command line
 
 ```sh
-swift build
-swift test
-.build/debug/meter --print
+meter --print        # one refresh, table to stdout
+meter --json         # the same data as JSON
+meter --dashboard    # render the ledger as HTML and open it
+meter --test-notify  # ask for notification permission and send a test
 ```
 
-Swift 6 toolchain, Swift 5 language mode, macOS 14+. SQLite comes from the
-system library, linked in `Package.swift`. Keys are read at refresh time
-from the keychain, environment, or CLI credential files, and are cached in
-memory per launch to avoid repeated keychain prompts.
+## Docs
 
-## License
-
-MIT. See [LICENSE](LICENSE).
+- [Install](docs/install.md)
+- [Configuration](docs/configuration.md)
+- [Providers](docs/providers.md)
+- [Usage data](docs/data.md)
+- [Development](docs/development.md)
