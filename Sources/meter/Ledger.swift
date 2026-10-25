@@ -395,6 +395,84 @@ final class Ledger {
         return out
     }
 
+    struct BreakdownRow {
+        let day: String
+        let provider: String
+        let project: String
+        let model: String
+        let spent: Double
+        let tokens: Int
+    }
+
+    func breakdownRows(from: String, to: String) -> [BreakdownRow] {
+        let db = ReadOnlyDB(path: url.path)
+        guard let db else { return [] }
+        return db.rows("""
+            SELECT day, provider, project, model, spent, tokens FROM breakdown
+            WHERE day >= '\(from)' AND day <= '\(to)'
+            ORDER BY day, provider, project, model
+            """).compactMap { row in
+            guard let day = ReadOnlyDB.text(row["day"]),
+                  let provider = ReadOnlyDB.text(row["provider"]) else { return nil }
+            return BreakdownRow(
+                day: day, provider: provider,
+                project: ReadOnlyDB.text(row["project"]) ?? "",
+                model: ReadOnlyDB.text(row["model"]) ?? "",
+                spent: ReadOnlyDB.num(row["spent"]) ?? 0,
+                tokens: Int(ReadOnlyDB.num(row["tokens"]) ?? 0))
+        }
+    }
+
+    struct QuotaNow {
+        let provider: String
+        let windowID: String
+        let usedPercent: Double?
+        let resetsAt: Date?
+        let capturedAt: Date
+    }
+
+    /// Latest reading per provider/window, ignoring windows that are no longer
+    /// polled (the dashboard should not show last week's stale rows).
+    func currentQuotas(since: Date = Date().addingTimeInterval(-2 * 86_400)) -> [QuotaNow] {
+        let db = ReadOnlyDB(path: url.path)
+        guard let db else { return [] }
+        let iso = ISO8601DateFormatter()
+        return db.rows("""
+            SELECT provider, window_id, used_percent, resets_at, MAX(captured_at) AS captured_at
+            FROM quota_snapshots
+            WHERE captured_at >= '\(iso.string(from: since))'
+            GROUP BY provider, window_id
+            ORDER BY provider, window_id
+            """).compactMap { row in
+            guard let provider = ReadOnlyDB.text(row["provider"]),
+                  let window = ReadOnlyDB.text(row["window_id"]),
+                  let captured = ReadOnlyDB.text(row["captured_at"]),
+                  let at = iso.date(from: captured) else { return nil }
+            return QuotaNow(provider: provider, windowID: window,
+                            usedPercent: ReadOnlyDB.num(row["used_percent"]),
+                            resetsAt: ReadOnlyDB.text(row["resets_at"]).flatMap { iso.date(from: $0) },
+                            capturedAt: at)
+        }
+    }
+
+    func quotaPeaks(from: String) -> [String: Double] {
+        let db = ReadOnlyDB(path: url.path)
+        guard let db else { return [:] }
+        var out: [String: Double] = [:]
+        for row in db.rows("""
+            SELECT provider, window_id, MAX(used_percent) AS peak FROM quota_snapshots
+            WHERE captured_at >= '\(from)'
+            GROUP BY provider, window_id
+            """) {
+            if let provider = ReadOnlyDB.text(row["provider"]),
+               let window = ReadOnlyDB.text(row["window_id"]),
+               let peak = ReadOnlyDB.num(row["peak"]) {
+                out["\(provider)|\(window)"] = peak
+            }
+        }
+        return out
+    }
+
     func days(from: String, to: String) -> [DayRow] {
         let db = ReadOnlyDB(path: url.path)
         guard let db else { return [] }
