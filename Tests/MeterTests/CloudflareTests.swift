@@ -24,6 +24,17 @@ final class CloudflareTests: XCTestCase {
         XCTAssertTrue(Cloudflare.parse(bad).isEmpty)
     }
 
+    func testCreditBalanceParsesCents() {
+        let json = Data(#"{"success":true,"result":{"balance":2000,"has_default_payment_method":true}}"#.utf8)
+        XCTAssertEqual(Cloudflare.parseCreditBalance(json), 20.0)
+        XCTAssertNil(Cloudflare.parseCreditBalance(Data(#"{"success":false}"#.utf8)))
+    }
+
+    func testCreditBalanceAllowsNegative() {
+        let json = Data(#"{"result":{"balance":-125}}"#.utf8)
+        XCTAssertEqual(Cloudflare.parseCreditBalance(json), -1.25)
+    }
+
     func testTodayFilteringViaSummarize() {
         let entries = Cloudflare.parse(Data("""
         {"result":[

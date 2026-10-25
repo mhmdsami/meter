@@ -45,6 +45,50 @@ final class ProviderParsingTests: XCTestCase {
         XCTAssertEqual(r.balanceNote, "$20.00 left")
     }
 
+    func testAmpDailyRecordedCostParsesToday() {
+        let now = isoDate("2026-10-22T12:00:00Z")!
+        let fixture = """
+        ## Daily Recorded Cost
+
+        | Date (UTC) | Covered | Paid | Total |
+        | --- | ---: | ---: | ---: |
+        | 2026-10-21 | $1.00 | $0.25 | $1.25 |
+        | 2026-10-22 | $0.50 | $1,234.56 | $1,235.06 |
+
+        ## Usage by Thread
+        """
+        XCTAssertEqual(Amp.parseDailyCost(fixture, now: now), 1235.06, accuracy: 0.0001)
+    }
+
+    func testAmpDailyCostNoUsageIsZero() {
+        let now = isoDate("2026-10-22T12:00:00Z")!
+        let fixture = """
+        ## Daily Recorded Cost
+
+        | Date (UTC) | Covered | Paid | Total |
+        | --- | ---: | ---: | ---: |
+        | No usage | $0 | $0 | $0 |
+        """
+        XCTAssertEqual(Amp.parseDailyCost(fixture, now: now), 0)
+    }
+
+    func testAmpCLIParsingFeedsTodaySpend() {
+        let now = isoDate("2026-10-22T12:00:00Z")!
+        let fixture = """
+        Signed in as user@example.com
+        Individual credits: $20 remaining (set up auto-reload to avoid running out) - https://ampcode.com/settings
+
+        ## Daily Recorded Cost
+
+        | Date (UTC) | Covered | Paid | Total |
+        | --- | ---: | ---: | ---: |
+        | 2026-10-22 | $0.40 | $0.10 | $0.50 |
+        """
+        let r = try! Amp.parseCLI(fixture, instance, now: now)
+        XCTAssertEqual(r.spendToday ?? -1, 0.50, accuracy: 0.0001)
+        XCTAssertEqual(r.balanceNote, "$20.00 left")
+    }
+
     func testAmpCLIParsingNoUsageThrows() {
         XCTAssertThrowsError(try Amp.parseCLI("Signed in as user@example.com\n", instance))
     }

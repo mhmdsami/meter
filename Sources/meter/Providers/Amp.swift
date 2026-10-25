@@ -44,7 +44,7 @@ enum Amp {
         let proc = Process()
         let pipe = Pipe()
         proc.executableURL = URL(fileURLWithPath: path)
-        proc.arguments = ["usage"]
+        proc.arguments = ["usage", "--details"]
         proc.standardOutput = pipe
         proc.standardError = FileHandle.nullDevice
         try proc.run()
@@ -63,7 +63,8 @@ enum Amp {
 
     /// Parses `amp usage` display text; newer CLIs wrap labels in `**bold**` markers.
     /// Throws when no usage lines match, so the caller can fall back to the RPC.
-    static func parseCLI(_ raw: String, _ instance: ProviderInstance) throws -> InstanceReading {
+    static func parseCLI(_ raw: String, _ instance: ProviderInstance,
+                         now: Date = Date()) throws -> InstanceReading {
         let text = raw.replacingOccurrences(of: "**", with: "")
         var windows: [UsageWindow] = []
         var balance: String?
@@ -91,7 +92,36 @@ enum Amp {
             throw ProviderError.badResponse("no usage lines in amp usage output")
         }
         return InstanceReading(id: instance.name, type: instance.type, name: instance.name,
-                               windows: windows, balanceNote: balance)
+                               windows: windows, balanceNote: balance,
+                               spendToday: parseDailyCost(text, now: now))
+    }
+
+    /// Today's recorded cost from the `--details` "Daily Recorded Cost" table.
+    /// Rows are UTC days; "No usage" (or a missing row) is $0.
+    static func parseDailyCost(_ text: String, now: Date = Date()) -> Double {
+        guard let marker = text.range(of: "## Daily Recorded Cost") else { return 0 }
+        let utc = DateFormatter()
+        utc.dateFormat = "yyyy-MM-dd"
+        utc.timeZone = TimeZone(identifier: "UTC")
+        let today = utc.string(from: now)
+        for raw in text[marker.upperBound...].split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("|") else {
+                if line.isEmpty { continue }
+                break // table ended
+            }
+            let cells = line.split(separator: "|", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            // ["", date, covered, paid, total, ""]
+            guard cells.count >= 5, cells[1] == today else { continue }
+            return money(cells[4]) ?? 0
+        }
+        return 0
+    }
+
+    private static func money(_ text: String) -> Double? {
+        Double(text.replacingOccurrences(of: "$", with: "")
+            .replacingOccurrences(of: ",", with: ""))
     }
 
     private static func captures(_ pattern: String, _ line: String) -> [String]? {

@@ -51,13 +51,40 @@ enum Cloudflare {
 
         let today = entries.filter { $0.createdAt >= since }
         let summary = summarize(today)
-        var note: String?
+        // prepaid Unified Billing credits; the API reports cents (like the rest of
+        // the AI Gateway billing endpoints), so 2000 means $20.00
+        let credits = try? await fetchCreditBalance(token: token, account: account)
+        var parts: [String] = []
+        if let credits { parts.append(creditNote(credits)) }
         if summary.requests > 0 {
-            note = "\(summary.requests) req · \(formatTokens(summary.tokens)) tok"
-            if summary.errors > 0 { note! += " · \(summary.errors) err" }
+            var usage = "\(summary.requests) req · \(formatTokens(summary.tokens)) tok"
+            if summary.errors > 0 { usage += " · \(summary.errors) err" }
+            parts.append(usage)
         }
         return InstanceReading(id: instance.name, type: instance.type, name: instance.name,
-                               balanceNote: note, spendToday: summary.cost)
+                               balanceNote: parts.isEmpty ? nil : parts.joined(separator: " · "),
+                               spendToday: summary.cost)
+    }
+
+    /// Pure so it can be tested: the response carries the balance in cents.
+    static func parseCreditBalance(_ data: Data) -> Double? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let result = root["result"] as? [String: Any],
+              let cents = optNum(result["balance"]) else { return nil }
+        return cents / 100
+    }
+
+    private static func fetchCreditBalance(token: String, account: String) async throws -> Double {
+        let url = URL(string: "https://api.cloudflare.com/client/v4/accounts/\(account)/ai-gateway/billing/credit-balance")!
+        let resp = try await HTTP.request(url, headers: ["Authorization": "Bearer \(token)"])
+        guard let balance = parseCreditBalance(resp.data) else {
+            throw ProviderError.badResponse("no credit balance in Cloudflare response")
+        }
+        return balance
+    }
+
+    private static func creditNote(_ dollars: Double) -> String {
+        String(format: "%@$%.2f left", dollars < 0 ? "-" : "", abs(dollars))
     }
 
     private static func option(_ key: String, instance: ProviderInstance, env: String) -> String? {
