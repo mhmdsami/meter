@@ -11,8 +11,8 @@ enum Antigravity {
     }
 
     static func fetch(_ instance: ProviderInstance) async throws -> InstanceReading {
-        // reuse a live agy between refreshes instead of paying the ~12s cold start
-        // every poll; reaped after idle. ponytail: single warm session — one account.
+        // one warm session is reused across polls; anything else we own is reaped
+        reapOrphans(keeping: currentWarmPid())
         if takeWarm(), let w = warmProbe() {
             do {
                 let obj = try await quota(port: w.port, csrf: w.csrf)
@@ -29,37 +29,63 @@ enum Antigravity {
 
     private static let warmLock = NSLock()
     private static var warm: (probe: Probe, lastUsed: Date)?
-    private static let warmIdle: TimeInterval = 240
+    /// Longer than the refresh interval so the session is reused, not churned.
+    private static let warmIdle: TimeInterval = 600
 
     private static func warmProbe() -> Probe? {
         warmLock.lock(); defer { warmLock.unlock() }
         return warm?.probe
     }
 
-    private static func takeWarm() -> Bool {
+    private static func currentWarmPid() -> pid_t? {
         warmLock.lock(); defer { warmLock.unlock() }
-        guard let w = warm, Date().timeIntervalSince(w.lastUsed) < warmIdle else { return false }
-        warm?.lastUsed = Date()
-        return true
+        return warm?.probe.pid
     }
 
-    private static func keepWarm(_ probe: Probe) {
-        warmLock.lock(); warm = (probe, Date()); warmLock.unlock()
-        Task.detached {
-            try? await Task.sleep(nanoseconds: 300_000_000_000)
-            reapIdle()
-        }
-    }
-
-    private static func reapIdle() {
+    private static func takeWarm() -> Bool {
         warmLock.lock()
-        guard let w = warm, Date().timeIntervalSince(w.lastUsed) >= warmIdle else {
-            warmLock.unlock(); return
+        guard let w = warm else { warmLock.unlock(); return false }
+        if Date().timeIntervalSince(w.lastUsed) < warmIdle {
+            warm?.lastUsed = Date()
+            warmLock.unlock()
+            return true
         }
         warm = nil
         warmLock.unlock()
-        kill(-w.probe.pid, SIGTERM)
-        close(w.probe.masterFD)
+        killProbe(w.probe)
+        return false
+    }
+
+    private static func keepWarm(_ probe: Probe) {
+        warmLock.lock()
+        let previous = warm?.probe
+        warm = (probe, Date())
+        warmLock.unlock()
+        if let previous, previous.pid != probe.pid { killProbe(previous) }
+        Task.detached {
+            try? await Task.sleep(nanoseconds: 300_000_000_000)
+            reapIdle(probe)
+        }
+    }
+
+    private static func reapIdle(_ probe: Probe) {
+        warmLock.lock()
+        guard let w = warm, w.probe.pid == probe.pid else {
+            warmLock.unlock(); return
+        }
+        if Date().timeIntervalSince(w.lastUsed) >= warmIdle {
+            warm = nil
+            warmLock.unlock()
+            killProbe(probe)
+            return
+        }
+        warmLock.unlock()
+        // keep watching: polling can stop (offline), and a one-shot check would
+        // leave the session running forever
+        Task.detached {
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            reapIdle(probe)
+        }
     }
 
     private static func reapWarm() {
@@ -67,9 +93,22 @@ enum Antigravity {
         let w = warm
         warm = nil
         warmLock.unlock()
-        if let w {
-            kill(-w.probe.pid, SIGTERM)
-            close(w.probe.masterFD)
+        if let w { killProbe(w.probe) }
+    }
+
+    /// Kill the warm session on normal app termination; leaked children are
+    /// swept on the next launch by `reapOrphans`.
+    static func shutdown() {
+        reapWarm()
+    }
+
+    private static func killProbe(_ probe: Probe) {
+        kill(-probe.pid, SIGTERM)
+        close(probe.masterFD)
+        let pid = probe.pid
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            if kill(pid, 0) == 0 { kill(-pid, SIGKILL) }
+            _ = waitpid(pid, nil, WNOHANG)
         }
     }
 
@@ -200,26 +239,48 @@ enum Antigravity {
         return nil
     }
 
-    /// agy is our PTY session leader; a meter restart orphans it (it outlives its
-    /// parent), so reap leftovers carrying our --csrf_token flag before spawning.
-    static func reapOrphans() {
+    /// agy is our PTY session leader; a meter restart orphans it. Kill every
+    /// flagged session we own (orphaned or a leftover child) except `keeping`.
+    static func reapOrphans(keeping keep: pid_t? = nil) {
+        for pid in flaggedAgys() {
+            if pid == getpid() || pid == keep { continue }
+            guard let ppid = parentPid(pid), ppid == 1 || ppid == getpid() else { continue }
+            kill(-pid, SIGTERM)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                if kill(pid, 0) == 0 { kill(-pid, SIGKILL) }
+                _ = waitpid(pid, nil, WNOHANG)
+            }
+        }
+    }
+
+    /// Only agy itself, and only the sessions meter spawned (`--csrf_token`).
+    private static func flaggedAgys() -> [pid_t] {
         let proc = Process()
         let pipe = Pipe()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        proc.arguments = ["-f", "csrf_token"]
+        proc.arguments = ["-x", "agy"]
         proc.standardOutput = pipe
         proc.standardError = FileHandle.nullDevice
-        guard (try? proc.run()) != nil else { return }
+        guard (try? proc.run()) != nil else { return [] }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         proc.waitUntilExit()
-        guard let text = String(data: data, encoding: .utf8) else { return }
-        for line in text.split(separator: "\n") {
-            guard let pid = pid_t(line), pid != getpid() else { continue }
-            // orphaned (reparented to launchd) and ours — no user agy passes the flag
-            if let ppid = parentPid(pid), ppid == 1 {
-                kill(-pid, SIGTERM)
-            }
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").compactMap { pid_t($0) }.filter {
+            commandLine($0)?.contains("--csrf_token") == true
         }
+    }
+
+    private static func commandLine(_ pid: pid_t) -> String? {
+        let proc = Process()
+        let pipe = Pipe()
+        proc.executableURL = URL(fileURLWithPath: "/bin/ps")
+        proc.arguments = ["-o", "command=", "-p", String(pid)]
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        guard (try? proc.run()) != nil else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        return String(data: data, encoding: .utf8)
     }
 
     private static func parentPid(_ pid: pid_t) -> pid_t? {

@@ -51,7 +51,12 @@ enum Amp {
         // a hung CLI would block the whole fetch fan-out (readDataToEndOfFile has
         // no timeout); kill it and fall back to the balance RPC
         DispatchQueue.global().asyncAfter(deadline: .now() + 10) {
-            if proc.isRunning { proc.terminate() }
+            guard proc.isRunning else { return }
+            proc.terminate()
+            let pid = proc.processIdentifier
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                if proc.isRunning { kill(pid, SIGKILL) }
+            }
         }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         proc.waitUntilExit()

@@ -13,6 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         NSApplication.shared.setActivationPolicy(.accessory)
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        Antigravity.shutdown()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.target = self

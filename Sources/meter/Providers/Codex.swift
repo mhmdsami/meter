@@ -104,6 +104,11 @@ enum Codex {
             watchdog.cancel()
             inPipe.fileHandleForWriting.closeFile()
             proc.terminate()
+            let pid = proc.processIdentifier
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                if proc.isRunning { kill(pid, SIGKILL) }
+                proc.waitUntilExit()
+            }
         }
 
         let request = { (id: Int, method: String, params: [String: Any]) in

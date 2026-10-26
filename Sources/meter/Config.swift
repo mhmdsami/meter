@@ -205,6 +205,14 @@ enum Secrets {
         env["HOME"] = FileManager.default.homeDirectoryForCurrentUser.path
         proc.environment = env
         if (try? proc.run()) != nil {
+            let pid = proc.processIdentifier
+            DispatchQueue.global().asyncAfter(deadline: .now() + 10) {
+                guard proc.isRunning else { return }
+                proc.terminate()
+                DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                    if proc.isRunning { kill(pid, SIGKILL) }
+                }
+            }
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             proc.waitUntilExit()
             if let text = String(data: data, encoding: .utf8) {
