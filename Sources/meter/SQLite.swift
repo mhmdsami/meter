@@ -21,6 +21,7 @@ final class ReadOnlyDB {
         case text(String)
         case double(Double)
         case int(Int64)
+        case blob(Data)
         case null
     }
 
@@ -38,6 +39,12 @@ final class ReadOnlyDB {
                 case SQLITE_TEXT: row[name] = .text(String(cString: sqlite3_column_text(stmt, i)))
                 case SQLITE_FLOAT: row[name] = .double(sqlite3_column_double(stmt, i))
                 case SQLITE_INTEGER: row[name] = .int(sqlite3_column_int64(stmt, i))
+                case SQLITE_BLOB:
+                    if let bytes = sqlite3_column_blob(stmt, i) {
+                        row[name] = .blob(Data(bytes: bytes, count: Int(sqlite3_column_bytes(stmt, i))))
+                    } else {
+                        row[name] = .null
+                    }
                 default: row[name] = .null
                 }
             }
@@ -56,6 +63,11 @@ final class ReadOnlyDB {
 
     static func text(_ v: Value?) -> String? {
         if case .text(let s) = v { return s }
+        return nil
+    }
+
+    static func data(_ v: Value?) -> Data? {
+        if case .blob(let d) = v { return d }
         return nil
     }
 }

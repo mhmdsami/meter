@@ -388,3 +388,42 @@ extension CostScanTests {
         XCTAssertTrue(CostScan.opencodeSpend(windowStart: isoDate("2026-02-01T00:00:00Z")!, dbPath: path).isEmpty)
     }
 }
+
+// MARK: - Antigravity protobuf
+
+extension CostScanTests {
+    private func varint(_ value: Int) -> [UInt8] {
+        var v = value
+        var out: [UInt8] = []
+        repeat {
+            var byte = UInt8(v & 0x7F)
+            v >>= 7
+            if v != 0 { byte |= 0x80 }
+            out.append(byte)
+        } while v != 0
+        return out
+    }
+
+    private func tag(_ field: Int, _ wire: Int) -> [UInt8] { varint((field << 3) | wire) }
+
+    private func bytesField(_ field: Int, _ bytes: [UInt8]) -> [UInt8] {
+        tag(field, 2) + varint(bytes.count) + bytes
+    }
+
+    private func varintField(_ field: Int, _ value: Int) -> [UInt8] {
+        tag(field, 0) + varint(value)
+    }
+
+    func testAntigravityMetaParsing() {
+        let model = Array("claude-sonnet-4-6".utf8)
+        let usage = varintField(2, 9613) + varintField(3, 183) + varintField(5, 9116)
+        let inner = bytesField(19, model) + bytesField(4, usage)
+        let data = Data(bytesField(1, inner))
+
+        let meta = CostScan.parseAntigravityMeta(data)
+        XCTAssertEqual(meta?.model, "claude-sonnet-4-6")
+        XCTAssertEqual(meta?.input, 9613)
+        XCTAssertEqual(meta?.output, 183)
+        XCTAssertEqual(meta?.cache, 9116)
+    }
+}

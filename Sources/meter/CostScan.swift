@@ -554,6 +554,171 @@ enum CostScan {
         pricing.cost(for: model)
     }
 
+    // MARK: - antigravity CLI conversations
+
+    /// The Antigravity CLI keeps one SQLite DB per conversation. Model and token
+    /// counts are in `gen_metadata` protobuf blobs; timestamps are in the
+    /// per-conversation transcript. The two lists line up one-to-one.
+    static func antigravitySpend(windowStart: Date, pricing: Pricing) -> [Spend] {
+        let root = NSString(string: "~/.gemini/antigravity-cli").expandingTildeInPath
+        let projects = antigravityProjects(root: root)
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: root + "/conversations") else {
+            return []
+        }
+        var out: [Spend] = []
+        for file in files where file.hasSuffix(".db") {
+            let id = String(file.dropLast(3))
+            let transcript = root + "/brain/\(id)/.system_generated/logs/transcript.jsonl"
+            guard let text = try? String(contentsOfFile: transcript, encoding: .utf8) else { continue }
+            let turns = antigravityTurns(text)
+            let metas = antigravityMeta(root: root, conversation: id)
+            guard !turns.isEmpty, !metas.isEmpty else { continue }
+            let project = projects[id] ?? ""
+            for (meta, turn) in zip(metas, turns) where turn.at >= windowStart {
+                guard let cost = pricing.cost(for: meta.model) else { continue }
+                let spent = Pricing.dollarsClaude(cost, input: meta.input, cacheRead: meta.cache,
+                                                  cacheWrite: 0, output: meta.output)
+                let tokens = Int(meta.input + meta.cache + meta.output)
+                guard spent > 0 || tokens > 0 else { continue }
+                out.append(Spend(day: day(turn.at), project: project, model: meta.model,
+                                 spent: spent, tokens: tokens, provider: "antigravity"))
+            }
+        }
+        return out
+    }
+
+    struct AntigravityMeta {
+        let model: String
+        let input: Double
+        let cache: Double
+        let output: Double
+    }
+
+    struct AntigravityTurn {
+        let at: Date
+        let input: Double
+        let cache: Double
+        let output: Double
+    }
+
+    /// Model id is protobuf `1.19`; usage is `1.4.{2,3,5}` = input/output/cache.
+    static func parseAntigravityMeta(_ data: Data) -> AntigravityMeta? {
+        guard let inner = pbBytes(data, 1),
+              let modelData = pbBytes(inner, 19),
+              let model = String(data: modelData, encoding: .utf8),
+              let usage = pbBytes(inner, 4) else { return nil }
+        let input = Double(pbVarint(usage, 2) ?? 0)
+        let output = Double(pbVarint(usage, 3) ?? 0)
+        let cache = Double(pbVarint(usage, 5) ?? 0)
+        guard input + output + cache > 0 else { return nil }
+        return AntigravityMeta(model: model, input: input, cache: cache, output: output)
+    }
+
+    private static func antigravityMeta(root: String, conversation: String) -> [AntigravityMeta] {
+        guard let db = ReadOnlyDB(path: root + "/conversations/\(conversation).db") else { return [] }
+        return db.rows("SELECT data FROM gen_metadata ORDER BY idx").compactMap { row in
+            guard let data = ReadOnlyDB.data(row["data"]) else { return nil }
+            return parseAntigravityMeta(data)
+        }
+    }
+
+    private static func antigravityTurns(_ text: String) -> [AntigravityTurn] {
+        var out: [AntigravityTurn] = []
+        eachLine(text) { obj in
+            guard obj["type"] as? String == "PLANNER_RESPONSE",
+                  let at = isoDate(obj["created_at"] as? String) else { return }
+            out.append(AntigravityTurn(at: at,
+                                       input: num(obj["input_tokens"]),
+                                       cache: num(obj["cache_read_tokens"]),
+                                       output: num(obj["output_tokens"])))
+        }
+        return out
+    }
+
+    private static func antigravityProjects(root: String) -> [String: String] {
+        var out: [String: String] = [:]
+        if let db = ReadOnlyDB(path: root + "/conversation_summaries.db") {
+            for row in db.rows("SELECT conversation_id, workspace_uris FROM conversation_summaries") {
+                guard let id = ReadOnlyDB.text(row["conversation_id"]),
+                      let json = ReadOnlyDB.text(row["workspace_uris"]),
+                      let data = json.data(using: .utf8),
+                      let uris = try? JSONSerialization.jsonObject(with: data) as? [String],
+                      let first = uris.first else { continue }
+                out[id] = first.hasPrefix("file://") ? String(first.dropFirst(7)) : first
+            }
+        }
+        // the CLI sometimes holds a write lock on the summaries DB; this cache
+        // maps workspace -> conversation and covers that refresh
+        let fallback = root + "/cache/last_conversations.json"
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: fallback)),
+           let map = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+            for (workspace, id) in map where out[id] == nil { out[id] = workspace }
+        }
+        return out
+    }
+
+    // MARK: - protobuf wire format (minimal)
+
+    private struct PBField {
+        let number: Int
+        let bytes: Data?
+        let varint: UInt64?
+    }
+
+    private static func pbFields(_ data: Data) -> [PBField] {
+        let b = [UInt8](data)
+        var i = 0
+        var out: [PBField] = []
+        while i < b.count {
+            var key: UInt64 = 0
+            var shift: UInt64 = 0
+            while i < b.count {
+                let byte = b[i]; i += 1
+                key |= UInt64(byte & 0x7F) << shift
+                if byte & 0x80 == 0 { break }
+                shift += 7
+            }
+            let number = Int(key >> 3)
+            switch Int(key & 7) {
+            case 0:
+                var value: UInt64 = 0
+                var s: UInt64 = 0
+                while i < b.count {
+                    let byte = b[i]; i += 1
+                    value |= UInt64(byte & 0x7F) << s
+                    if byte & 0x80 == 0 { break }
+                    s += 7
+                }
+                out.append(PBField(number: number, bytes: nil, varint: value))
+            case 2:
+                var length: UInt64 = 0
+                var s: UInt64 = 0
+                while i < b.count {
+                    let byte = b[i]; i += 1
+                    length |= UInt64(byte & 0x7F) << s
+                    if byte & 0x80 == 0 { break }
+                    s += 7
+                }
+                let n = Int(length)
+                guard i + n <= b.count else { return out }
+                out.append(PBField(number: number, bytes: Data(b[i..<i + n]), varint: nil))
+                i += n
+            case 5: i += 4
+            case 1: i += 8
+            default: return out
+            }
+        }
+        return out
+    }
+
+    private static func pbBytes(_ data: Data, _ number: Int) -> Data? {
+        pbFields(data).first { $0.number == number }?.bytes
+    }
+
+    private static func pbVarint(_ data: Data, _ number: Int) -> UInt64? {
+        pbFields(data).first { $0.number == number }?.varint
+    }
+
     // MARK: - shared JSONL line iteration
 
     private static func eachLine(_ text: String, _ body: ([String: Any]) -> Void) {

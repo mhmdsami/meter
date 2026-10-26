@@ -9,7 +9,7 @@ like; every instance gets its own row.
 | `openrouter` | credit balance, today's spend | API key |
 | `codex` | session and weekly windows, today's spend | `~/.codex/auth.json`, or the `codex app-server` RPC |
 | `claude` | session and weekly windows, today's spend | Claude Code's keychain item |
-| `antigravity` | Gemini and "Others" quota windows | local `agy` CLI login |
+| `antigravity` | Gemini and "Others" quota windows, today's cost from local CLI conversations | local `agy` CLI login |
 | `amp` | free-tier meter, subscription pools, credit balance, today's recorded cost | `amp` CLI login or API key |
 | `zed` | edit-prediction usage, billing cycle | Zed's keychain login |
 | `vercel` | paid AI Gateway spend from the `fx` log | `~/.fx/usage.jsonl` |
@@ -36,6 +36,9 @@ The scans cover:
 - Claude project logs, plus the project stores embedded in Claude Desktop.
 - opencode's database (`session_message` / `session_v2` in v2).
 - pi and OMP agent sessions.
+- The Antigravity CLI's conversation DBs and transcripts
+  (`~/.gemini/antigravity-cli`), where token usage and the model per turn are
+  recorded.
 - The `fx` AI Gateway usage log.
 
 Attribution rules worth knowing:

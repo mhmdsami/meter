@@ -111,7 +111,8 @@ enum Providers {
                     + piSpend(for: "claude", pricing: pricing, windowStart: windowStart)
             },
             .firstEnabled("antigravity") { pricing, windowStart in
-                piSpend(for: "antigravity", pricing: pricing, windowStart: windowStart)
+                CostScan.antigravitySpend(windowStart: windowStart, pricing: pricing)
+                    + piSpend(for: "antigravity", pricing: pricing, windowStart: windowStart)
             },
             .firstEnabled("straitly") { pricing, windowStart in
                 piSpend(for: "straitly", pricing: pricing, windowStart: windowStart)
