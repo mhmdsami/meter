@@ -96,10 +96,23 @@ enum Antigravity {
         if let w { killProbe(w.probe) }
     }
 
-    /// Kill the warm session on normal app termination; leaked children are
-    /// swept on the next launch by `reapOrphans`.
+    /// Kill the warm session on normal termination. Synchronous: a one-shot CLI
+    /// exits right after this, so a queued SIGKILL escalation would never run.
     static func shutdown() {
-        reapWarm()
+        warmLock.lock()
+        let w = warm
+        warm = nil
+        warmLock.unlock()
+        guard let w else { return }
+        kill(-w.probe.pid, SIGTERM)
+        close(w.probe.masterFD)
+        // give it a moment to exit gracefully, then force it and reap the child
+        for _ in 0..<20 {
+            if waitpid(w.probe.pid, nil, WNOHANG) == w.probe.pid { return }
+            usleep(50_000)
+        }
+        kill(-w.probe.pid, SIGKILL)
+        _ = waitpid(w.probe.pid, nil, 0)
     }
 
     private static func killProbe(_ probe: Probe) {

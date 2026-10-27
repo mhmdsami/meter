@@ -427,3 +427,37 @@ extension CostScanTests {
         XCTAssertEqual(meta?.cache, 9116)
     }
 }
+
+// MARK: - Streamed line parsing
+
+extension CostScanTests {
+    func testStreamedFileMatchesTextParse() throws {
+        let text = """
+        {"type":"turn_context","payload":{"model":"gpt-5.2","cwd":"/tmp/p"}}
+        \(codexLine("2026-01-02T09:00:00Z", input: 1_000_000, cached: 0, output: 500_000))
+        \(codexLine("2026-01-02T10:00:00Z", input: 2_000_000, cached: 0, output: 1_000_000))
+        """
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meter-stream-\(UUID().uuidString).jsonl")
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let streamed = CostScan.fileSpend(source: .file(url), format: .codex, pricing: pricing)
+        let inMemory = CostScan.fileSpend(text: text, format: .codex, pricing: pricing)
+        XCTAssertEqual(streamed.count, inMemory.count)
+        XCTAssertEqual(streamed.first?.spent ?? -1, inMemory.first?.spent ?? -2, accuracy: 0.0001)
+        XCTAssertEqual(streamed.first?.project, "/tmp/p")
+    }
+
+    func testStreamedFileWithoutTrailingNewline() throws {
+        let text = "{\"kind\":\"generation\",\"fact\":{\"id\":\"a\",\"created_at_ms\":1767225600000,\"input_tokens\":10,\"output_tokens\":5,\"total_cost\":0.25,\"model\":\"m\"}}"
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meter-stream-\(UUID().uuidString).jsonl")
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let rows = CostScan.fileSpend(source: .file(url), format: .vercel, pricing: pricing)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].spent, 0.25, accuracy: 0.0001)
+    }
+}

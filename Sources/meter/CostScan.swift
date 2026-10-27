@@ -167,6 +167,13 @@ enum CostScan {
 
     enum LogFormat { case codex, claude, vercel, pi }
 
+    /// In-memory text (tests, small files) or a file streamed a line at a time so
+    /// a 100 MB session log is never resident all at once.
+    enum Lines {
+        case text(String)
+        case file(URL)
+    }
+
     private struct Stamp: Equatable {
         let mtime: Date
         let size: Int
@@ -179,12 +186,21 @@ enum CostScan {
         }
     }
 
-    private static var fileCache: [String: (Stamp, [Spend])] = [:]
+    private struct CachedParse {
+        var stamp: Stamp
+        var rows: [Spend]
+        var used: Date
+    }
+
+    private static var fileCache: [String: CachedParse] = [:]
     private static let cacheLock = NSLock()
+    /// Bounds the cache when pruned sessions stop being visited.
+    private static let cacheLimit = 4000
 
     static func spend(urls: [URL], format: LogFormat, windowStart: Date, pricing: Pricing) -> [Spend] {
         let fm = FileManager.default
         var out: [Spend] = []
+        var seen: [String] = []
         for url in urls {
             guard let attrs = try? fm.attributesOfItem(atPath: url.path),
                   let mtime = attrs[.modificationDate] as? Date,
@@ -194,20 +210,37 @@ enum CostScan {
             let hit = fileCache[url.path]
             cacheLock.unlock()
             let parsed: [Spend]
-            if let hit, hit.0 == stamp {
-                parsed = hit.1
+            if let hit, hit.stamp == stamp {
+                parsed = hit.rows
             } else {
-                guard let data = try? Data(contentsOf: url),
-                      let text = String(data: data, encoding: .utf8) else { continue }
-                parsed = fileSpend(text: text, format: format, pricing: pricing,
+                parsed = fileSpend(source: .file(url), format: format, pricing: pricing,
                                    fallbackProject: folderName(url))
                 cacheLock.lock()
-                fileCache[url.path] = (stamp, parsed)
+                fileCache[url.path] = CachedParse(stamp: stamp, rows: parsed, used: Date())
                 cacheLock.unlock()
             }
+            seen.append(url.path)
             out.append(contentsOf: parsed)
         }
+        prune(seen: seen)
         return out
+    }
+
+    /// Old sessions fall out of the window and stop being visited; drop their
+    /// rows rather than tracking every log file ever written.
+    private static func prune(seen: [String]) {
+        let now = Date()
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        for path in seen { fileCache[path]?.used = now }
+        guard fileCache.count > cacheLimit else { return }
+        let keep = Set(seen)
+        let excess = fileCache.count - cacheLimit
+        let victims = fileCache
+            .filter { !keep.contains($0.key) }
+            .sorted { $0.value.used < $1.value.used }
+            .prefix(excess)
+            .map(\.key)
+        for path in victims { fileCache.removeValue(forKey: path) }
     }
 
     /// Day totals, used by the menu's today row and history bars.
@@ -221,11 +254,17 @@ enum CostScan {
 
     static func fileSpend(text: String, format: LogFormat, pricing: Pricing,
                           fallbackProject: String = "") -> [Spend] {
+        fileSpend(source: .text(text), format: format, pricing: pricing,
+                  fallbackProject: fallbackProject)
+    }
+
+    static func fileSpend(source: Lines, format: LogFormat, pricing: Pricing,
+                          fallbackProject: String = "") -> [Spend] {
         switch format {
-        case .codex: return codexSpend(text: text, pricing: pricing)
-        case .claude: return claudeSpend(text: text, pricing: pricing, fallbackProject: fallbackProject)
-        case .vercel: return vercelSpend(text: text, pricing: pricing)
-        case .pi: return piSpend(text: text, pricing: pricing)
+        case .codex: return codexSpend(source, pricing: pricing)
+        case .claude: return claudeSpend(source, pricing: pricing, fallbackProject: fallbackProject)
+        case .vercel: return vercelSpend(source, pricing: pricing)
+        case .pi: return piSpend(source, pricing: pricing)
         }
     }
 
@@ -253,7 +292,10 @@ enum CostScan {
         let windowStart = cal.date(byAdding: .day, value: -(days - 1), to: startOfToday)!
         var out: [String: [Spend]] = [:]
         for source in Providers.LocalCostSource.all where types.contains(source.type) {
+            // parsers can surface older days from a resumed session file; the
+            // window is what this pass is allowed to rewrite
             out[source.type] = source.spend(pricing, windowStart)
+                .filter { $0.day >= windowStart }
         }
         return out
     }
@@ -279,12 +321,12 @@ enum CostScan {
     // its max total minus the max before that day started (counters are monotonic).
     // Attribution is per file: the session's cwd for the project and the model of
     // the day's last turn (a session that switches models bills the day to the last).
-    static func codexSpend(text: String, pricing: Pricing) -> [Spend] {
+    static func codexSpend(_ source: Lines, pricing: Pricing) -> [Spend] {
         struct Event { let ts: Date; let input: Double; let cached: Double; let output: Double; let model: String }
         var events: [Event] = []
         var project = ""
         var currentModel = ""
-        eachLine(text) { obj in
+        eachLine(source) { obj in
             switch obj["type"] as? String {
             case "session_meta":
                 if let payload = obj["payload"] as? [String: Any], let cwd = payload["cwd"] as? String {
@@ -357,9 +399,8 @@ enum CostScan {
     static func codexSourceSpend(windowStart: Date, pricing: Pricing) -> [Spend] {
         var out = spend(urls: codexURLs(windowStart: windowStart), format: .codex,
                         windowStart: windowStart, pricing: pricing)
-        if let data = try? Data(contentsOf: fxURL()), let text = String(data: data, encoding: .utf8) {
-            out.append(contentsOf: fxCodexSpend(text: text, pricing: pricing).filter { $0.day >= windowStart })
-        }
+        out.append(contentsOf: fxCodexSpend(.file(fxURL()), pricing: pricing)
+            .filter { $0.day >= windowStart })
         return out
     }
 
@@ -367,7 +408,7 @@ enum CostScan {
 
     // Claude: assistant lines carry per-message usage and the session cwd; dedupe
     // streaming chunks by (id, requestId), price each message, bucket by timestamp.
-    static func claudeSpend(text: String, pricing: Pricing, fallbackProject: String) -> [Spend] {
+    static func claudeSpend(_ source: Lines, pricing: Pricing, fallbackProject: String) -> [Spend] {
         struct Msg {
             var sum: Double
             var input: Double
@@ -381,7 +422,7 @@ enum CostScan {
         }
         var best: [String: Msg] = [:]
         var cwd = ""
-        eachLine(text) { obj in
+        eachLine(source) { obj in
             if let c = obj["cwd"] as? String, !c.isEmpty { cwd = c }
             guard obj["type"] as? String == "assistant",
                   let message = obj["message"] as? [String: Any],
@@ -431,14 +472,13 @@ enum CostScan {
 
     /// ~/.fx/usage.jsonl logs every generation with a precomputed total_cost; "pending"
     /// lines share ids with their final "generation" line, so dedupe by id.
-    static func fxGenerations(text: String) -> [FxGeneration] {
+    static func fxGenerations(_ source: Lines) -> [FxGeneration] {
         var best: [String: FxGeneration] = [:]
-        for line in text.split(separator: "\n") {
-            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-                  obj["kind"] as? String == "generation",
+        eachLine(source) { obj in
+            guard obj["kind"] as? String == "generation",
                   let fact = obj["fact"] as? [String: Any],
                   let id = fact["id"] as? String,
-                  let ms = optNum(fact["created_at_ms"]) else { continue }
+                  let ms = optNum(fact["created_at_ms"]) else { return }
             let input = optNum(fact["input_tokens"]) ?? 0
             let read = optNum(fact["cache_read_tokens"]) ?? 0
             let output = optNum(fact["output_tokens"]) ?? 0
@@ -456,8 +496,8 @@ enum CostScan {
     }
 
     /// What the gateway actually charged: paid generations only.
-    static func vercelSpend(text: String, pricing: Pricing) -> [Spend] {
-        fxGenerations(text: text)
+    static func vercelSpend(_ source: Lines, pricing: Pricing) -> [Spend] {
+        fxGenerations(source)
             .filter { $0.cost > 0 && $0.day > .distantPast }
             .map { Spend(day: $0.day, project: "", model: $0.model, spent: $0.cost,
                          tokens: Int($0.input + $0.read + $0.output)) }
@@ -466,7 +506,11 @@ enum CostScan {
     /// Subscription-billed codex/* generations report $0; estimate them at list
     /// from the logged tokens (cached reads are a subset of input, Codex-style).
     static func fxCodexSpend(text: String, pricing: Pricing) -> [Spend] {
-        fxGenerations(text: text).compactMap { gen in
+        fxCodexSpend(.text(text), pricing: pricing)
+    }
+
+    static func fxCodexSpend(_ source: Lines, pricing: Pricing) -> [Spend] {
+        fxGenerations(source).compactMap { gen in
             let bare = String(gen.model.dropFirst("codex/".count))
             guard gen.cost == 0, gen.model.hasPrefix("codex/"),
                   let cost = pricing.cost(for: bare) else { return nil }
@@ -481,7 +525,7 @@ enum CostScan {
 
     /// pi: one assistant "message" row per turn with Claude-style usage; dedupe by
     /// message id and price at list (pi's own cost field is unreliable).
-    static func piSpend(text: String, pricing: Pricing) -> [Spend] {
+    static func piSpend(_ source: Lines, pricing: Pricing) -> [Spend] {
         struct Msg {
             var sum: Double
             var input: Double
@@ -496,7 +540,7 @@ enum CostScan {
         }
         var best: [String: Msg] = [:]
         var cwd = ""
-        eachLine(text) { obj in
+        eachLine(source) { obj in
             if let c = obj["cwd"] as? String, !c.isEmpty { cwd = c }
             guard obj["type"] as? String == "message",
                   let message = obj["message"] as? [String: Any],
@@ -569,8 +613,7 @@ enum CostScan {
         for file in files where file.hasSuffix(".db") {
             let id = String(file.dropLast(3))
             let transcript = root + "/brain/\(id)/.system_generated/logs/transcript.jsonl"
-            guard let text = try? String(contentsOfFile: transcript, encoding: .utf8) else { continue }
-            let turns = antigravityTurns(text)
+            let turns = antigravityTurns(at: URL(fileURLWithPath: transcript))
             let metas = antigravityMeta(root: root, conversation: id)
             guard !turns.isEmpty, !metas.isEmpty else { continue }
             let project = projects[id] ?? ""
@@ -622,9 +665,9 @@ enum CostScan {
         }
     }
 
-    private static func antigravityTurns(_ text: String) -> [AntigravityTurn] {
+    private static func antigravityTurns(at url: URL) -> [AntigravityTurn] {
         var out: [AntigravityTurn] = []
-        eachLine(text) { obj in
+        eachLine(.file(url)) { obj in
             guard obj["type"] as? String == "PLANNER_RESPONSE",
                   let at = isoDate(obj["created_at"] as? String) else { return }
             out.append(AntigravityTurn(at: at,
@@ -721,11 +764,46 @@ enum CostScan {
 
     // MARK: - shared JSONL line iteration
 
-    private static func eachLine(_ text: String, _ body: ([String: Any]) -> Void) {
-        for line in text.split(separator: "\n") {
-            guard let data = line.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-            body(obj)
+    /// Feed JSON objects to `body` one line at a time. `.file` reads in fixed
+    /// chunks and keeps only the unfinished tail, so a 100 MB rollout file never
+    /// becomes a 200 MB Data + String pair; each line drains its autoreleased
+    /// JSON objects before the next one is parsed.
+    private static func eachLine(_ source: Lines, _ body: ([String: Any]) -> Void) {
+        switch source {
+        case .text(let text):
+            for line in text.split(separator: "\n") {
+                autoreleasepool {
+                    parseLine(Data(line.utf8), body)
+                }
+            }
+        case .file(let url):
+            guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+            defer { try? handle.close() }
+            var buffer = Data()
+            while true {
+                // read() hands back autoreleased NSData; on a detached cooperative
+                // thread nothing drains it, so a 40 MB log would leak 40 MB per pass
+                let chunk: Data? = autoreleasepool { try? handle.read(upToCount: 1 << 18) }
+                guard let chunk, !chunk.isEmpty else { break }
+                buffer.append(chunk)
+                var start = buffer.startIndex
+                while let newline = buffer[start...].firstIndex(of: 0x0A) {
+                    autoreleasepool {
+                        parseLine(Data(buffer[start..<newline]), body)
+                    }
+                    start = buffer.index(after: newline)
+                }
+                if start > buffer.startIndex { buffer = Data(buffer[start...]) }
+            }
+            if !buffer.isEmpty {
+                autoreleasepool { parseLine(buffer, body) }
+            }
         }
+    }
+
+    private static func parseLine(_ data: Data, _ body: ([String: Any]) -> Void) {
+        guard !data.isEmpty,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        body(obj)
     }
 }

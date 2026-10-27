@@ -33,7 +33,9 @@ point: three `opencode` entries with different keys are three rows.
 | `options` | provider-specific settings |
 
 `interval_minutes` on an instance overrides the global value. This is useful
-for providers that rate-limit, like Claude.
+for providers that rate-limit, like Claude. It gates network fetches only: the
+app wakes every 60 seconds, while local log scans re-derive the last two days
+each time and reconcile the full history much less often.
 
 ## Keys
 

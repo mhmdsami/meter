@@ -27,8 +27,19 @@ final class Store: ObservableObject {
     @Published var readings: [InstanceReading] = []
     @Published var history: [HistoryLine] = []
     @Published var lastRefresh: Date?
+    @Published var isRefreshing = false
     private var pollTask: Task<Void, Never>?
     private var lastFetch: [String: Date] = [:]
+    private var refreshInFlight = false
+    private var queuedForce = false
+    private var lastFullScan: Date?
+
+    /// The poll loop is a 60s heartbeat; each provider still fetches on its own
+    /// interval (default 5 minutes). Scans are windowed: only the last two days
+    /// are re-derived every tick, and the full history is reconciled rarely.
+    private static let recentScanDays = 2
+    private static let historyScanDays = 30
+    private static let fullScanEvery: TimeInterval = 30 * 60
 
     init(config: Config) {
         self.config = config
@@ -133,6 +144,17 @@ final class Store: ObservableObject {
         return out
     }
 
+    /// Keep the previous spend values on rows that have not been re-priced yet,
+    /// so publishing fresh quota data early does not blank the $ column.
+    nonisolated static func carrySpend(_ readings: [InstanceReading],
+                                       from previous: [InstanceReading]) -> [InstanceReading] {
+        var out = readings
+        for i in out.indices where out[i].spendToday == nil {
+            out[i].spendToday = previous.first { $0.name == out[i].name }?.spendToday
+        }
+        return out
+    }
+
     func startPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
@@ -155,9 +177,30 @@ final class Store: ObservableObject {
 
     private var reconnectTask: Task<Void, Never>?
 
+    /// One refresh at a time; a manual refresh that lands mid-cycle is queued and
+    /// re-runs as a forced pass instead of racing the background one.
+    func refreshAll(force: Bool = false, interactive: Bool = false) async {
+        if refreshInFlight {
+            if force { queuedForce = true }
+            return
+        }
+        refreshInFlight = true
+        isRefreshing = true
+        defer {
+            refreshInFlight = false
+            isRefreshing = false
+        }
+        var forced = force
+        repeat {
+            queuedForce = false
+            await refreshOnce(force: forced, interactive: interactive)
+            forced = true
+        } while queuedForce
+    }
+
     /// `interactive` is true only for user-initiated refreshes, which may raise a
     /// keychain authorization dialog; background cycles read without prompting.
-    func refreshAll(force: Bool = false, interactive: Bool = false) async {
+    private func refreshOnce(force: Bool, interactive: Bool) async {
         // offline: make no requests at all; keep showing cached readings and
         // wait for the reconnect watcher to force a refresh
         guard NetworkMonitor.shared.isOnline else { return }
@@ -165,6 +208,18 @@ final class Store: ObservableObject {
         defer { Keychain.setInteraction(false) }
         config = ConfigStore.load()
         let now = Date()
+        let types = Set(config.providers.filter(\.enabled).map(\.type))
+        let pricing = await Pricing.load()
+        // a forced (manual/reconnect) refresh or the periodic reconcile rebuilds
+        // history; every other tick only re-derives the last two days
+        let deep = force || lastFullScan.map { now.timeIntervalSince($0) >= Self.fullScanEvery } ?? true
+        let days = deep ? Self.historyScanDays : Self.recentScanDays
+        if deep { lastFullScan = now }
+        // the log pass and the network fetches touch different data, so run them
+        // together instead of adding one latency to the other on a manual refresh
+        let scan = Task.detached {
+            CostScan.spendTotals(days: days, types: types, pricing: pricing)
+        }
         let dueNames = Self.dueInstances(
             config.providers, lastFetch: lastFetch, now: now,
             force: force, globalIntervalMinutes: config.intervalMinutes)
@@ -180,20 +235,18 @@ final class Store: ObservableObject {
                 merged.append(old)
             }
         }
-        // publish readings fast: today's buckets only need files touched today;
-        // the 30-day history pass below reuses their cached parse
-        let types = Set(config.providers.filter(\.enabled).map(\.type))
-        let pricing = await Pricing.load()
-        let spend = await Task.detached {
-            CostScan.spendTotals(days: 30, types: types, pricing: pricing)
-        }.value
+        // publish quota data now: the log scans below are not instant, and a
+        // manual refresh should visibly change the menu as soon as it returns
+        readings = Providers.hideEmpty(Self.carrySpend(merged, from: readings))
+
+        let spend = await scan.value
         let todayScan = CostScan.dailyTotals(spend, days: 1).mapValues { $0.first ?? 0 }
         let today = Self.mergeToday(scans: todayScan, ledger: Ledger.shared.todayByProvider())
         readings = Providers.attachLocalCosts(
-            merged, enabled: config.providers.filter(\.enabled), today: today)
+            readings, enabled: config.providers.filter(\.enabled), today: today)
         let snapshot = readings
         Task.detached { Self.persist(snapshot) }
-        let daily = CostScan.dailyTotals(spend, days: 30)
+        let daily = CostScan.dailyTotals(spend, days: days)
         history = Self.historyLines(Self.historyDaily(scans: daily,
                                                       ledger: Ledger.shared.recentDailyTotals(days: 30)))
         let enabled = config.providers.filter(\.enabled)
@@ -205,7 +258,7 @@ final class Store: ObservableObject {
         // ledger/dashboard keep the real provider behind "other"; the menubar row
         // above stays aggregated, which is why this is separate from `daily`
         let ledgerSpend = Self.ledgerSpend(spend)
-        let ledgerDaily = CostScan.dailyTotals(ledgerSpend, days: 30)
+        let ledgerDaily = CostScan.dailyTotals(ledgerSpend, days: days)
         Task.detached {
             Ledger.shared.recordDaily(ledgerDaily, targetNames: targets,
                                       pricingGen: gen, reported: Self.reportedProviders)

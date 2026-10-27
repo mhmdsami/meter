@@ -17,6 +17,7 @@ enum PrintMode {
         Task.detached {
             if dashboard {
                 Dashboard.writeAndOpen(days: intArg("--days") ?? 90)
+                Antigravity.shutdown()
                 exit(0)
             }
             let config = ConfigStore.load()
@@ -33,6 +34,7 @@ enum PrintMode {
                 ledger: Ledger.shared.recentDailyTotals(days: 30)))
             print(json ? encode(config: config, readings: readings, history: history)
                        : render(config: config, readings: readings))
+            Antigravity.shutdown()
             exit(0)
         }
         // block until the task above terminates the process

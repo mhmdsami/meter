@@ -15,8 +15,10 @@ reinstall.
 
 Writes are upserts keyed by day, provider, and (for `breakdown`) project and
 model, so a refresh cannot double-count. Past days are marked `final`; today is
-provisional. The first run backfills 90 days from the local scans; later runs
-rewrite the recent window from the same scans.
+provisional. The first run backfills 90 days from the local scans. Normal
+refreshes rewrite only today and yesterday; the full 30-day window is
+reconciled on launch, on a manual refresh, and every 30 minutes. That keeps
+older rows stable when a log has been pruned or edited by hand.
 
 The `source` column is `reported` when the provider's own billing supplied the
 number (opencode, vercel) and `estimated` when it was priced from token counts

@@ -43,7 +43,10 @@ struct MenuContent: View {
             }
             Divider()
             HStack {
-                Button("Refresh") { Task { await Store.shared.refreshAll(force: true, interactive: true) } }
+                Button(store.isRefreshing ? "Refreshing…" : "Refresh") {
+                    Task { await Store.shared.refreshAll(force: true, interactive: true) }
+                }
+                .disabled(store.isRefreshing)
                 Spacer()
                 Button("Dashboard") { Dashboard.writeAndOpen(days: 30) }
                 Button("Config") { NSWorkspace.shared.open(ConfigStore.url) }

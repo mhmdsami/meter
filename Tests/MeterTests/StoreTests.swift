@@ -38,3 +38,19 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(merged["opencode"] ?? 0, 0.21, accuracy: 0.0001) // scan newer than ledger
     }
 }
+
+extension StoreTests {
+    func testCarrySpendKeepsOldValuesOnFreshReadings() {
+        let old = [
+            InstanceReading(id: "a", type: "claude", name: "Claude", spendToday: 9.5),
+            InstanceReading(id: "b", type: "codex", name: "Codex", spendToday: 2.0),
+        ]
+        let fresh = [
+            InstanceReading(id: "a", type: "claude", name: "Claude"),
+            InstanceReading(id: "c", type: "amp", name: "Amp"),
+        ]
+        let out = Store.carrySpend(fresh, from: old)
+        XCTAssertEqual(out[0].spendToday ?? -1, 9.5, accuracy: 0.0001)
+        XCTAssertNil(out[1].spendToday) // no previous row for this name
+    }
+}
