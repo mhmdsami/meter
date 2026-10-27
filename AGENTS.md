@@ -35,7 +35,6 @@ Sources/meter/
   Dashboard.swift    static HTML dashboard rendered from the ledger
   Notifier.swift     threshold alerts (pure decision + UNUserNotificationCenter)
    Pricing.swift      models.dev price table, cached in ~/.cache/meter/models.json
-  UsageWatcher.swift FSEvents over usage logs; gates refresh scans
   SQLite.swift       thin readonly libsqlite3 wrapper
   PrintMode.swift    --print / --json / --dashboard one-shot modes
   MenuView.swift     dropdown rows, bars, countdowns

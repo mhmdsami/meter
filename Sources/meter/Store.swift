@@ -32,17 +32,19 @@ final class Store: ObservableObject {
     private var lastFetch: [String: Date] = [:]
     private var refreshInFlight = false
     private var queuedForce = false
-    private var lastFullScan: Date?
-    private var lastScanGeneration: UInt64?
+    private var lastScanAt: Date?
+    private var lastDeepScan: Date?
     /// Last scan's per-provider today totals, reused on fetch-only refreshes.
     private var lastToday: [String: Double] = [:]
 
-    /// The poll loop is a 60s heartbeat; each provider still fetches on its own
-    /// interval (default 5 minutes). Scans are windowed: only the last two days
-    /// are re-derived every tick, and the full history is reconciled rarely.
+    /// Spending is a day bucket, so the scan window cannot be shorter than today;
+    /// cadence is what keeps it cheap. Every tick checks whether a pass is due.
+    /// A 2-day pass every 10 minutes tracks live sessions; a 30-day reconcile
+    /// every 6 hours catches resumed sessions that write into older days.
     private static let recentScanDays = 2
     private static let historyScanDays = 30
-    private static let fullScanEvery: TimeInterval = 30 * 60
+    private static let scanEvery: TimeInterval = 10 * 60
+    private static let deepScanEvery: TimeInterval = 6 * 60 * 60
 
     init(config: Config) {
         self.config = config
@@ -180,11 +182,11 @@ final class Store: ObservableObject {
 
     private var reconnectTask: Task<Void, Never>?
 
-    /// A log pass is needed when the periodic reconcile is due, the watcher is
-    /// unavailable, or it has seen a change since the last pass.
-    nonisolated static func scanDue(deep: Bool, watcherActive: Bool,
-                                    lastGeneration: UInt64?, generation: UInt64) -> Bool {
-        deep || !watcherActive || lastGeneration != generation
+    /// A log pass is due on the regular cadence, on the deeper reconcile, or on
+    /// a forced (manual/reconnect) refresh.
+    nonisolated static func scanDue(now: Date, lastScan: Date?, force: Bool,
+                                    every: TimeInterval) -> Bool {
+        force || lastScan.map { now.timeIntervalSince($0) >= every } ?? true
     }
 
     /// One refresh at a time; a manual refresh that lands mid-cycle is queued and
@@ -221,12 +223,13 @@ final class Store: ObservableObject {
             force: force, globalIntervalMinutes: config.intervalMinutes)
         let due = config.providers.filter { dueNames.contains($0.name) }
 
-        // The log pass is event-driven: it runs only when a watched log changed,
-        // or on the periodic reconcile that covers anything FSEvents missed.
-        let scanGen = UsageWatcher.shared.generation
-        let deep = force || lastFullScan.map { now.timeIntervalSince($0) >= Self.fullScanEvery } ?? true
-        let scanDue = Self.scanDue(deep: deep, watcherActive: UsageWatcher.shared.isActive,
-                                   lastGeneration: lastScanGeneration, generation: scanGen)
+        // Cadence, not window size, is what keeps the log pass cheap: a 2-day
+        // pass every 10 minutes tracks live sessions; a 30-day reconcile every
+        // few hours catches resumed sessions that write into older days.
+        let deep = Self.scanDue(now: now, lastScan: lastDeepScan,
+                                force: force, every: Self.deepScanEvery)
+        let scanDue = Self.scanDue(now: now, lastScan: lastScanAt,
+                                   force: force, every: Self.scanEvery)
         guard !due.isEmpty || scanDue else { return }
 
         Keychain.setInteraction(interactive)
@@ -268,8 +271,8 @@ final class Store: ObservableObject {
             let todayScan = CostScan.dailyTotals(spend, days: 1).mapValues { $0.first ?? 0 }
             today = Self.mergeToday(scans: todayScan, ledger: Ledger.shared.todayByProvider())
             lastToday = today
-            lastScanGeneration = scanGen
-            if deep { lastFullScan = now }
+            lastScanAt = now
+            if deep { lastDeepScan = now }
             let daily = CostScan.dailyTotals(spend, days: days)
             history = Self.historyLines(Self.historyDaily(scans: daily,
                                                           ledger: Ledger.shared.recentDailyTotals(days: 30)))

@@ -34,8 +34,8 @@ point: three `opencode` entries with different keys are three rows.
 
 `interval_minutes` on an instance overrides the global value. This is useful
 for providers that rate-limit, like Claude. It gates network fetches only: the
-app wakes every 60 seconds, while local log scans run only when a watched log
-changed (plus a 30-minute reconcile).
+app wakes every 60 seconds, local log scans run every 10 minutes, and the full
+30-day reconcile runs every 6 hours.
 
 ## Keys
 

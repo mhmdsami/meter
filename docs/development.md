@@ -31,7 +31,6 @@ Sources/meter/
   Dashboard.swift    static HTML from the ledger
   Notifier.swift     threshold alerts
   Pricing.swift      models.dev price table
-  UsageWatcher.swift FSEvents over usage logs; gates refresh scans
   SQLite.swift       small read-only SQLite wrapper
   PrintMode.swift    --print / --json / --dashboard
   MenuView.swift     dropdown rows and bars

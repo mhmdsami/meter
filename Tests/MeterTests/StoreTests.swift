@@ -56,21 +56,14 @@ extension StoreTests {
 }
 
 extension StoreTests {
-    func testScanIsSkippedWhenNothingChanged() {
-        // unchanged, watcher healthy, no reconcile due
-        XCTAssertFalse(Store.scanDue(deep: false, watcherActive: true,
-                                     lastGeneration: 7, generation: 7))
-        // a watched log changed
-        XCTAssertTrue(Store.scanDue(deep: false, watcherActive: true,
-                                    lastGeneration: 7, generation: 8))
-        // first scan after launch
-        XCTAssertTrue(Store.scanDue(deep: false, watcherActive: true,
-                                    lastGeneration: nil, generation: 7))
-        // watcher could not start: always scan
-        XCTAssertTrue(Store.scanDue(deep: false, watcherActive: false,
-                                    lastGeneration: 7, generation: 7))
-        // periodic reconcile
-        XCTAssertTrue(Store.scanDue(deep: true, watcherActive: true,
-                                    lastGeneration: 7, generation: 7))
+    func testScanCadence() {
+        let now = Date()
+        XCTAssertTrue(Store.scanDue(now: now, lastScan: nil, force: false, every: 600))
+        XCTAssertFalse(Store.scanDue(now: now, lastScan: now.addingTimeInterval(-599),
+                                     force: false, every: 600))
+        XCTAssertTrue(Store.scanDue(now: now, lastScan: now.addingTimeInterval(-600),
+                                    force: false, every: 600))
+        XCTAssertTrue(Store.scanDue(now: now, lastScan: now.addingTimeInterval(-1),
+                                    force: true, every: 600))
     }
 }

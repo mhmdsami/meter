@@ -112,23 +112,6 @@ enum CostScan {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".fx/usage.jsonl")
     }
 
-    /// Directories the scans read. Only existing paths are watched; a root that
-    /// appears later is still covered by the periodic full reconcile.
-    static func watchRoots() -> [String] {
-        var roots = [
-            "~/.codex/sessions", "~/.codex/archived_sessions", "~/.fx",
-            "~/.pi/agent/sessions", "~/.omp/agent/sessions",
-            "~/.local/share/opencode", "~/.gemini/antigravity-cli",
-            "~/Library/Application Support/Claude/local-agent-mode-sessions",
-            "~/Library/Application Support/Claude/claude-code-sessions",
-        ]
-        let claude = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"]
-            .map { [$0] } ?? ["~/.config/claude", "~/.claude"]
-        roots.append(contentsOf: claude.map { $0 + "/projects" })
-        return roots.map { NSString(string: $0).expandingTildeInPath }
-            .filter { FileManager.default.fileExists(atPath: $0) }
-    }
-
     // MARK: - opencode db (v2; costs are precomputed $)
 
     /// opencode v2 keeps per-assistant-message cost/tokens in `session_message.data`
