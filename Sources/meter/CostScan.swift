@@ -294,10 +294,19 @@ enum CostScan {
         for source in Providers.LocalCostSource.all where types.contains(source.type) {
             // parsers can surface older days from a resumed session file; the
             // window is what this pass is allowed to rewrite
-            out[source.type] = source.spend(pricing, windowStart)
+            out[source.type] = source.spend(pricing, discoveryStart(for: source.type, windowStart: windowStart))
                 .filter { $0.day >= windowStart }
         }
         return out
+    }
+
+    /// Codex keeps appending to the rollout file of the session's start day, so a
+    /// resumed thread's *today* usage can sit in a month-old directory. Discovery
+    /// always reaches back; only the returned rows are windowed.
+    static func discoveryStart(for type: String, windowStart: Date) -> Date {
+        guard type == "codex" else { return windowStart }
+        let back = Calendar.current.date(byAdding: .day, value: -29, to: startOfToday)!
+        return min(windowStart, back)
     }
 
     /// Collapse attributed rows into the per-type daily arrays the menu uses.

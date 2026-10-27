@@ -461,3 +461,17 @@ extension CostScanTests {
         XCTAssertEqual(rows[0].spent, 0.25, accuracy: 0.0001)
     }
 }
+
+// MARK: - discovery window
+
+extension CostScanTests {
+    func testCodexDiscoveryReachesBackForResumedSessions() {
+        let today = CostScan.startOfToday
+        let windowStart = Calendar.current.date(byAdding: .day, value: -1, to: today)!
+        let expected = Calendar.current.date(byAdding: .day, value: -29, to: today)!
+        // a resumed codex thread writes today's usage into its start-day directory
+        XCTAssertEqual(CostScan.discoveryStart(for: "codex", windowStart: windowStart), expected)
+        // every other source timestamps each row, so the row window is enough
+        XCTAssertEqual(CostScan.discoveryStart(for: "claude", windowStart: windowStart), windowStart)
+    }
+}
