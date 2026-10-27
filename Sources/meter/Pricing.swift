@@ -19,12 +19,24 @@ final class Pricing {
             .appendingPathComponent(".cache/meter/models.json")
     }
 
+    private static let cacheLock = NSLock()
+    private static var parsed: (mtime: Date, pricing: Pricing)?
+
+    /// The price table is ~6 MB of JSON; parse it once per file revision rather
+    /// than on every refresh. A pricing object is read-only after `parse`.
     static func load() async -> Pricing {
         let fm = FileManager.default
+        let mtime = (try? fm.attributesOfItem(atPath: cacheURL.path))?[.modificationDate] as? Date
+
+        cacheLock.lock()
+        let hit = parsed
+        cacheLock.unlock()
+        if let hit, hit.mtime == mtime { return hit.pricing }
+
         let pricing = Pricing()
 
         var data = try? Data(contentsOf: cacheURL)
-        var generation = (try? fm.attributesOfItem(atPath: cacheURL.path))?[.modificationDate] as? Date
+        var generation = mtime
 
         let isFresh = generation.map { Date().timeIntervalSince($0) < 86_400 } ?? false
         if data == nil || !isFresh {
@@ -40,6 +52,12 @@ final class Pricing {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return pricing }
         pricing.parse(obj)
         pricing.generation = generation ?? .distantPast
+        // only cache a real table; an empty result must retry on the next refresh
+        if let onDisk = (try? fm.attributesOfItem(atPath: cacheURL.path))?[.modificationDate] as? Date {
+            cacheLock.lock()
+            parsed = (onDisk, pricing)
+            cacheLock.unlock()
+        }
         return pricing
     }
 
