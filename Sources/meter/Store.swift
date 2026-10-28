@@ -182,6 +182,20 @@ final class Store: ObservableObject {
 
     private var reconnectTask: Task<Void, Never>?
 
+    /// (provider|yyyy-MM-dd) pairs whose spend was priced from tokens rather
+    /// than reported by the provider, used for the ledger's `source` column.
+    nonisolated static func estimatedDays(_ spend: [String: [CostScan.Spend]]) -> Set<String> {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        var out = Set<String>()
+        for (provider, rows) in spend {
+            for row in rows where row.estimated {
+                out.insert(provider + "|" + fmt.string(from: row.day))
+            }
+        }
+        return out
+    }
+
     /// A log pass is due on the regular cadence, on the deeper reconcile, or on
     /// a forced (manual/reconnect) refresh.
     nonisolated static func scanDue(now: Date, lastScan: Date?, force: Bool,
@@ -285,9 +299,11 @@ final class Store: ObservableObject {
             // row above stays aggregated, which is why this is separate from `daily`
             let ledgerSpend = Self.ledgerSpend(spend)
             let ledgerDaily = CostScan.dailyTotals(ledgerSpend, days: days)
+            let estimated = Self.estimatedDays(ledgerSpend)
             Task.detached {
                 Ledger.shared.recordDaily(ledgerDaily, targetNames: targets,
-                                          pricingGen: gen, reported: Self.reportedProviders)
+                                          pricingGen: gen, reported: Self.reportedProviders,
+                                          estimatedDays: estimated)
                 Ledger.shared.recordBreakdown(ledgerSpend, targetNames: targets,
                                               pricingGen: gen, reported: Self.reportedProviders)
                 if backfillNeeded {
@@ -296,9 +312,11 @@ final class Store: ObservableObject {
                     let wideSpend = CostScan.spendTotals(days: 90, types: typesForBackfill, pricing: widePricing)
                     let wideLedger = Self.ledgerSpend(wideSpend)
                     let wide = CostScan.dailyTotals(wideLedger, days: 90)
+                    let wideEstimated = Self.estimatedDays(wideLedger)
                     Ledger.shared.recordDaily(wide, targetNames: targets,
                                               pricingGen: widePricing.generation,
-                                              reported: Self.reportedProviders)
+                                              reported: Self.reportedProviders,
+                                              estimatedDays: wideEstimated)
                     Ledger.shared.recordBreakdown(wideLedger, targetNames: targets,
                                                   pricingGen: widePricing.generation,
                                                   reported: Self.reportedProviders)

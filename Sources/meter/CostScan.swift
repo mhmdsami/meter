@@ -17,6 +17,9 @@ enum CostScan {
         /// billing provider id when the source records one (pi tags every message
         /// with the provider that served it); "" for sources that don't.
         var provider: String = ""
+        /// `spent` was priced from tokens because the source reported no cost
+        /// (opencode 2.2+ stopped writing per-message cost).
+        var estimated: Bool = false
     }
 
     static var startOfToday: Date {
@@ -117,7 +120,7 @@ enum CostScan {
     /// opencode v2 keeps per-assistant-message cost/tokens in `session_message.data`
     /// and moved the project directory off the message onto `session_v2.directory`.
     /// The pre-v2 `message` table is gone, so only the v2 schema is read.
-    static func opencodeSpend(windowStart: Date,
+    static func opencodeSpend(windowStart: Date, pricing: Pricing,
                               dbPath: String = NSString(string: "~/.local/share/opencode/opencode.db").expandingTildeInPath) -> [Spend] {
         let db = ReadOnlyDB(path: dbPath)
         guard let db else { return [] }
@@ -130,10 +133,11 @@ enum CostScan {
                    json_extract(m.data,'$.model.providerID') AS provider,
                    json_extract(m.data,'$.model.id') AS model,
                    SUM(json_extract(m.data,'$.cost')) AS total,
-                   SUM(COALESCE(json_extract(m.data,'$.tokens.input'),0)
-                     + COALESCE(json_extract(m.data,'$.tokens.output'),0)
-                     + COALESCE(json_extract(m.data,'$.tokens.cache.read'),0)
-                     + COALESCE(json_extract(m.data,'$.tokens.cache.write'),0)) AS tokens
+                   SUM(COALESCE(json_extract(m.data,'$.tokens.input'),0)) AS input,
+                   SUM(COALESCE(json_extract(m.data,'$.tokens.output'),0)) AS output,
+                   SUM(COALESCE(json_extract(m.data,'$.tokens.reasoning'),0)) AS reasoning,
+                   SUM(COALESCE(json_extract(m.data,'$.tokens.cache.read'),0)) AS cache_read,
+                   SUM(COALESCE(json_extract(m.data,'$.tokens.cache.write'),0)) AS cache_write
             FROM session_message m
             JOIN session_v2 s ON s.id = m.session_id
             WHERE m.type='assistant'
@@ -145,12 +149,30 @@ enum CostScan {
         return rows.compactMap { row in
             guard let dayText = ReadOnlyDB.text(row["day"]),
                   let parsed = fmt.date(from: dayText) else { return nil }
+            let model = ReadOnlyDB.text(row["model"])?.split(separator: "/").last.map(String.init) ?? ""
+            let provider = ReadOnlyDB.text(row["provider"]) ?? ""
+            let input = ReadOnlyDB.num(row["input"]) ?? 0
+            let output = ReadOnlyDB.num(row["output"]) ?? 0
+            let reasoning = ReadOnlyDB.num(row["reasoning"]) ?? 0
+            let cacheRead = ReadOnlyDB.num(row["cache_read"]) ?? 0
+            let cacheWrite = ReadOnlyDB.num(row["cache_write"]) ?? 0
+            let reported = ReadOnlyDB.num(row["total"]) ?? 0
+            // opencode 2.2 stopped writing a per-message cost (and bills reasoning
+            // as output); price the tokens only when the source gave us nothing
+            let estimated = reported <= 0
+            let spent = estimated
+                ? pricing.cost(for: model, provider: provider).map {
+                    Pricing.dollarsClaude($0, input: input, cacheRead: cacheRead,
+                                          cacheWrite: cacheWrite, output: output + reasoning)
+                } ?? 0
+                : reported
             return Spend(day: parsed,
                          project: ReadOnlyDB.text(row["cwd"]) ?? "",
-                         model: ReadOnlyDB.text(row["model"])?.split(separator: "/").last.map(String.init) ?? "",
-                         spent: ReadOnlyDB.num(row["total"]) ?? 0,
-                         tokens: Int(ReadOnlyDB.num(row["tokens"]) ?? 0),
-                         provider: ReadOnlyDB.text(row["provider"]) ?? "")
+                         model: model,
+                         spent: spent,
+                         tokens: Int(input + output + reasoning + cacheRead + cacheWrite),
+                         provider: provider,
+                         estimated: estimated)
         }
     }
 

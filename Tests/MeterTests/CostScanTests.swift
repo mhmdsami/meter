@@ -351,7 +351,7 @@ extension CostScanTests {
         ])
         defer { try? FileManager.default.removeItem(atPath: path) }
 
-        let rows = CostScan.opencodeSpend(windowStart: isoDate("2026-01-01T00:00:00Z")!, dbPath: path)
+        let rows = CostScan.opencodeSpend(windowStart: isoDate("2026-01-01T00:00:00Z")!, pricing: pricing, dbPath: path)
         // every provider is returned and tagged; routing to a row happens in Providers
         XCTAssertEqual(rows.count, 2)
         let oc = try XCTUnwrap(rows.first { $0.provider == "opencode-go" })
@@ -385,7 +385,7 @@ extension CostScanTests {
         ])
         defer { try? FileManager.default.removeItem(atPath: path) }
 
-        XCTAssertTrue(CostScan.opencodeSpend(windowStart: isoDate("2026-02-01T00:00:00Z")!, dbPath: path).isEmpty)
+        XCTAssertTrue(CostScan.opencodeSpend(windowStart: isoDate("2026-02-01T00:00:00Z")!, pricing: pricing, dbPath: path).isEmpty)
     }
 }
 
@@ -473,5 +473,38 @@ extension CostScanTests {
         XCTAssertEqual(CostScan.discoveryStart(for: "codex", windowStart: windowStart), expected)
         // every other source timestamps each row, so the row window is enough
         XCTAssertEqual(CostScan.discoveryStart(for: "claude", windowStart: windowStart), windowStart)
+    }
+}
+
+extension CostScanTests {
+    func testOpencodeZeroCostIsPricedFromTokensIncludingReasoning() throws {
+        let ts = isoDate("2026-01-03T09:00:00Z")!
+        let ms = Int64(ts.timeIntervalSince1970 * 1000)
+        let path = try makeOpencodeDB([
+            """
+            CREATE TABLE session_v2 (id text PRIMARY KEY, project_id text NOT NULL, slug text NOT NULL,
+              directory text NOT NULL, version text NOT NULL, cost real DEFAULT 0 NOT NULL,
+              model text, time_created integer NOT NULL, time_updated integer NOT NULL)
+            """,
+            """
+            CREATE TABLE session_message (id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL,
+              seq integer NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL)
+            """,
+            "INSERT INTO session_v2 (id, project_id, slug, directory, version, time_created, time_updated) VALUES ('ses1','p1','x','/p','1',\(ms),\(ms))",
+            """
+            INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+            VALUES ('m1','ses1','assistant',1,\(ms),\(ms),
+              '{"model":{"id":"gpt-5.2","providerID":"opencode-go"},"cost":0,"tokens":{"input":1000000,"output":1000000,"reasoning":1000000,"cache":{"read":1000000,"write":0}}}')
+            """,
+        ])
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let rows = CostScan.opencodeSpend(windowStart: isoDate("2026-01-01T00:00:00Z")!,
+                                          pricing: pricing, dbPath: path)
+        let row = try XCTUnwrap(rows.first)
+        XCTAssertTrue(row.estimated)
+        // gpt-5.2: 1M in @ $1 + 2M out (output + reasoning) @ $2 + 1M cache @ $0.5
+        XCTAssertEqual(row.spent, 5.5, accuracy: 0.0001)
+        XCTAssertEqual(row.tokens, 4_000_000)
     }
 }

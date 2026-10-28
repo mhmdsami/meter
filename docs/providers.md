@@ -49,9 +49,11 @@ Attribution rules worth knowing:
   generations are priced from their logged tokens and counted as Codex spend,
   leaving only what the gateway actually billed on the Vercel row.
 - opencode's local spend follows whichever account its credential store
-  currently holds.
-- Rows whose source is the provider's own billing (`opencode`, `vercel`) are
-  marked `reported`; everything else is `estimated`.
+  currently holds. Since opencode 2.2 the message rows carry tokens but no
+  per-message cost, so those rows are priced from tokens at the provider's
+  published rate and marked estimated.
+- Rows whose source is the provider's own billing (`vercel`) are marked
+  `reported`; everything else is `estimated`.
 
 ## What it doesn't do
 

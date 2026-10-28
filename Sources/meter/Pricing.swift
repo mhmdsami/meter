@@ -10,6 +10,9 @@ final class Pricing {
     }
 
     private var models: [String: ModelCost] = [:]
+    /// Per-provider prices, so a reseller's at-cost rate can be used for usage
+    /// that provider reported without a dollar amount.
+    private var byProvider: [String: [String: ModelCost]] = [:]
 
     /// Bumps whenever the price table itself changes, so derived caches can invalidate.
     var generation: Date = .distantPast
@@ -69,6 +72,7 @@ final class Pricing {
 
     func parse(_ root: [String: Any]) {
         var entries: [String: (isOfficial: Bool, cost: ModelCost)] = [:]
+        var perProvider: [String: [String: ModelCost]] = [:]
         for (providerKey, provider) in root {
             guard let providerDict = provider as? [String: Any],
                   let modelDict = providerDict["models"] as? [String: Any] else { continue }
@@ -80,11 +84,13 @@ final class Pricing {
                     input: num(cost["input"]), output: num(cost["output"]),
                     cacheRead: num(cost["cache_read"]), cacheWrite: num(cost["cache_write"]))
                 let key = id.lowercased()
+                perProvider[providerKey.lowercased(), default: [:]][key] = parsed
                 if let existing = entries[key], !beats(parsed, isOfficial, existing) { continue }
                 entries[key] = (isOfficial, parsed)
             }
         }
         models = entries.mapValues(\.cost)
+        byProvider = perProvider
     }
 
     /// Official beats reseller; within the same tier the higher list price wins so
@@ -97,8 +103,9 @@ final class Pricing {
         return candidate.input + candidate.output > existing.cost.input + existing.cost.output
     }
 
-    func cost(for modelID: String) -> ModelCost? {
+    func cost(for modelID: String, provider: String? = nil) -> ModelCost? {
         let base = modelID.lowercased()
+        if let provider, let exact = byProvider[provider.lowercased()]?[base] { return exact }
         if let exact = models[base] { return exact }
         // strip bracket variants like "claude-sonnet-4-5[1m]"
         let stripped = base.replacingOccurrences(of: #"\[.*\]$"#, with: "", options: .regularExpression)

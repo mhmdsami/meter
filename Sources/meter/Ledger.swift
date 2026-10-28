@@ -122,13 +122,17 @@ final class Ledger {
         let now = ISO8601DateFormatter().string(from: Date())
 
         struct Key: Hashable { let day: String; let provider: String; let project: String; let model: String }
-        var totals: [Key: (spent: Double, tokens: Int)] = [:]
+        struct Total { var spent = 0.0; var tokens = 0; var estimated = false }
+        var totals: [Key: Total] = [:]
         for (provider, rows) in spend {
             for row in rows where row.spent > 0 || row.tokens > 0 {
                 let key = Key(day: fmt.string(from: row.day), provider: provider,
                               project: row.project, model: row.model)
-                let running = totals[key] ?? (0, 0)
-                totals[key] = (running.spent + row.spent, running.tokens + row.tokens)
+                var running = totals[key] ?? Total()
+                running.spent += row.spent
+                running.tokens += row.tokens
+                running.estimated = running.estimated || row.estimated
+                totals[key] = running
             }
         }
 
@@ -166,7 +170,8 @@ final class Ledger {
             sqlite3_bind_text(stmt, 4, key.model, -1, sqliteTransient)
             sqlite3_bind_double(stmt, 5, total.spent)
             sqlite3_bind_int(stmt, 6, Int32(total.tokens))
-            sqlite3_bind_text(stmt, 7, reported.contains(key.provider) ? "reported" : "estimated", -1, sqliteTransient)
+            let source = total.estimated || !reported.contains(key.provider) ? "estimated" : "reported"
+            sqlite3_bind_text(stmt, 7, source, -1, sqliteTransient)
             sqlite3_bind_text(stmt, 8, gen, -1, sqliteTransient)
             sqlite3_bind_text(stmt, 9, now, -1, sqliteTransient)
             sqlite3_step(stmt)
@@ -228,7 +233,8 @@ final class Ledger {
     /// only days with spend are stored, and days before today are marked final
     /// so later price-table changes cannot rewrite them.
     func recordDaily(_ daily: [String: [Double]], targetNames: [String: String],
-                     pricingGen: Date, reported: Set<String>) {
+                     pricingGen: Date, reported: Set<String>,
+                     estimatedDays: Set<String> = []) {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
         let fmt = DateFormatter()
@@ -236,11 +242,15 @@ final class Ledger {
         for (provider, values) in daily {
             for (offset, spent) in values.enumerated() where spent > 0.004 {
                 guard let day = cal.date(byAdding: .day, value: -offset, to: today) else { continue }
-                record(day: fmt.string(from: day),
+                let dayText = fmt.string(from: day)
+                let source = reported.contains(provider)
+                    && !estimatedDays.contains(provider + "|" + dayText)
+                    ? "reported" : "estimated"
+                record(day: dayText,
                        provider: provider,
                        account: targetNames[provider] ?? "",
                        spent: spent,
-                       source: reported.contains(provider) ? "reported" : "estimated",
+                       source: source,
                        pricingGen: ISO8601DateFormatter().string(from: pricingGen),
                        final: offset > 0)
             }

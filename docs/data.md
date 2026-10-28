@@ -24,8 +24,10 @@ session discovery still reaches back 30 days, because a resumed thread appends
 today's usage to the rollout file created on its first day.
 
 The `source` column is `reported` when the provider's own billing supplied the
-number (opencode, vercel) and `estimated` when it was priced from token counts
-at list rates.
+number (vercel) and `estimated` when it was priced from token counts at list
+rates. opencode used to report a per-message cost; 2.2 stopped doing that, so
+its spend is priced from tokens at that provider's rate (reasoning tokens count
+as output) and marked `estimated`.
 
 ## Today and history in the menu
 

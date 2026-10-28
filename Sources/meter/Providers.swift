@@ -123,7 +123,7 @@ enum Providers {
             },
             .init(type: "opencode",
                   spend: { pricing, windowStart in
-                      CostScan.opencodeSpend(windowStart: windowStart)
+                      CostScan.opencodeSpend(windowStart: windowStart, pricing: pricing)
                           .filter { CostScan.opencodeProviderType($0.provider) == "opencode" }
                           + piSpend(for: "opencode", pricing: pricing, windowStart: windowStart)
                   },
@@ -142,7 +142,7 @@ enum Providers {
                       let pi = CostScan.spend(urls: CostScan.piURLs(), format: .pi,
                                               windowStart: windowStart, pricing: pricing)
                           .filter { CostScan.piProviderType($0.provider) == nil }
-                      let oc = CostScan.opencodeSpend(windowStart: windowStart)
+                      let oc = CostScan.opencodeSpend(windowStart: windowStart, pricing: pricing)
                           .filter { CostScan.opencodeProviderType($0.provider) == nil }
                       return pi + oc
                   },

@@ -67,3 +67,20 @@ extension StoreTests {
                                     force: true, every: 600))
     }
 }
+
+extension StoreTests {
+    func testEstimatedDaysFlagsOnlyEstimatedRows() {
+        let day = CostScan.startOfToday
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let spend = ["opencode": [
+            CostScan.Spend(day: day, project: "/p", model: "a", spent: 1, estimated: true),
+            CostScan.Spend(day: day, project: "/p", model: "b", spent: 2),
+        ]]
+        let set = Store.estimatedDays(spend)
+        XCTAssertTrue(set.contains("opencode|" + fmt.string(from: day)))
+        XCTAssertFalse(Store.estimatedDays(["vercel": [
+            CostScan.Spend(day: day, project: "", model: "m", spent: 3),
+        ]]).contains("vercel|" + fmt.string(from: day)))
+    }
+}
