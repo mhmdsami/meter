@@ -3,12 +3,12 @@
 ## Commands
 
 ```sh
-swift build                     # debug build
-swift test                      # unit tests (needs Xcode for XCTest)
-swift build -c release
-.build/debug/meter --print      # one refresh, table to stdout
-.build/debug/meter --json       # same data as JSON
-./install.sh                    # release build plus the app bundle and agent
+swift build --package-path menubar                     # debug build
+swift test --package-path menubar                      # unit tests (needs Xcode for XCTest)
+swift build -c release --package-path menubar
+menubar/.build/debug/meter --print                     # one refresh, table to stdout
+menubar/.build/debug/meter --json                      # same data as JSON
+./install.sh                                           # release build plus the app bundle and agent
 ```
 
 `--print` is the quickest way to exercise every enabled provider against live
@@ -18,7 +18,9 @@ tests, so treat the parser tests as the source of truth.
 ## Layout
 
 ```
-Sources/meter/
+menubar/
+  Package.swift
+  Sources/meter/
   MeterApp.swift     menu bar item, popover, activation policy
   Store.swift        main-actor state: config, readings, poll loop
   Config.swift       config model and key resolution
@@ -35,7 +37,9 @@ Sources/meter/
   PrintMode.swift    --print / --json / --dashboard
   MenuView.swift     dropdown rows and bars
   Providers/*.swift  one file per provider type
-Tests/MeterTests/    XCTest, no host app
+  Tests/MeterTests/    XCTest, no host app
+collector/           Rust agent: scans a remote host, pushes rows to the Worker
+dashboard/           Next.js dashboard + APIs on Cloudflare Workers/D1
 ```
 
 Repository conventions live in [AGENTS.md](../AGENTS.md). The short version:
@@ -44,7 +48,7 @@ system frameworks only, and comments only where a constraint is not obvious.
 
 ## Adding a provider
 
-1. Add `Sources/meter/Providers/YourThing.swift` with a
+1. Add `menubar/Sources/meter/Providers/YourThing.swift` with a
    `static func fetch(_ instance: ProviderInstance) async throws -> InstanceReading`.
 2. Register it in `Providers.all`.
 3. If it needs credentials, support `env:NAME`, `auth:<id>`, or a keychain slot

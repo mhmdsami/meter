@@ -3,3 +3,13 @@
 *.xcodeproj
 .swiftpm/
 Package.resolved
+
+# dashboard
+dashboard/node_modules/
+dashboard/.next/
+dashboard/.open-next/
+dashboard/.dev.vars
+dashboard/.wrangler/
+
+# collector
+collector/target/

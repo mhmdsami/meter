@@ -1,0 +1,3 @@
+METER_TOKEN=replace-with-a-long-random-token
+DASHBOARD_PASSWORD=replace-with-a-password
+SESSION_SECRET=replace-with-32-plus-random-bytes

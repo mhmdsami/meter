@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "meter",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true },
+  "workers_dev": true,
+  "routes": [{ "pattern": "meter.sam1.space", "custom_domain": true }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "meter",
+      "migrations_dir": "migrations/d1",
+      "database_id": "53f69129-0709-4882-be9d-3183b42ea728"
+    }
+  ]
+}

@@ -284,6 +284,14 @@ final class Store: ObservableObject {
             let spend = await scan.value
             let todayScan = CostScan.dailyTotals(spend, days: 1).mapValues { $0.first ?? 0 }
             today = Self.mergeToday(scans: todayScan, ledger: Ledger.shared.todayByProvider())
+            if let collector = config.collector, collector.enabled {
+                // push the local day, then add every other host's day back in;
+                // exclude_host keeps this machine's own rows out of the sum
+                await Collector.push(spend, config: collector)
+                for (type, value) in await Collector.today(config: collector) {
+                    today[type, default: 0] += value
+                }
+            }
             lastToday = today
             lastScanAt = now
             if deep { lastDeepScan = now }

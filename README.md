@@ -1,42 +1,85 @@
 # meter
 
+AI usage tracking across machines, in three parts:
+
+| component | what it is |
+|---|---|
+| [`menubar/`](menubar) | Swift macOS menu bar app: local scans, quota windows, balances, ledger |
+| [`collector/`](collector) | Rust agent for remote hosts: scans their logs and pushes rows |
+| [`dashboard/`](dashboard) | Next.js on Cloudflare Workers + D1: ingest API, summary API, Google-gated dashboard at <https://meter.sam1.space> |
+
+```
+mac (menubar) ──┐
+                ├─ POST /api/ingest → D1 → Next.js dashboard
+space (collector)┘         ↑
+                     menubar GET /api/summary
+```
+
+Each host scans its own logs locally. The collector and the Mac push
+`(host, day, provider, project, model, spent, tokens, source)` rows to the
+Worker, which replaces each `(host, day, provider)` group atomically. The
+dashboard reads D1; the menubar reads the summary API.
+
+## Menubar
+
 A macOS menu bar app for AI usage and spend. It tracks multiple named
 instances of the same provider, so three OpenCode accounts are three rows,
 not one.
 
-The menu bar shows today's estimated spend. The dropdown lists one row per
-instance: quota windows with reset countdowns, credit balances, today's
-spend, and errors. There is no settings window; configuration is a JSON file.
-A local SQLite ledger records daily totals and powers a static HTML dashboard.
-
-SwiftUI and SwiftPM, no third-party dependencies, macOS 14 or later.
-
-## Install
+The dropdown lists one row per instance: quota windows with reset countdowns,
+credit balances, today's spend, and errors. There is no settings window;
+configuration is `~/.config/meter/config.json`. A local SQLite ledger records
+daily totals and powers the offline dashboard.
 
 ```sh
 ./install.sh
 ```
 
 This builds `~/Applications/meter.app` and loads the `app.meter.meter`
-LaunchAgent. The first run may ask for keychain access to credentials owned
-by Claude Code or Zed; choose **Always Allow**.
-
-Then edit `~/.config/meter/config.json` to choose your providers, and restart:
-
-```sh
-launchctl kickstart -k gui/$(id -u)/app.meter.meter
-```
-
-See [docs/install.md](docs/install.md) for the details.
-
-## Command line
+LaunchAgent. The first run may ask for keychain access to credentials owned by
+Claude Code or Zed; choose **Always Allow**.
 
 ```sh
 meter --print        # one refresh, table to stdout
 meter --json         # the same data as JSON
-meter --dashboard    # render the ledger as HTML and open it
+meter --dashboard    # render the local ledger as HTML and open it
 meter --test-notify  # ask for notification permission and send a test
 ```
+
+SwiftUI and SwiftPM, no third-party dependencies, macOS 14 or later.
+
+## Collector
+
+Rust, no C toolchain required: SQLite reads use `python3`, HTTP uses `curl`.
+Scans opencode, pi/OMP, and Claude Code on a remote host, then pushes to the
+dashboard API.
+
+```sh
+cd collector
+cargo build --release
+./target/release/meter-collector --dry-run
+```
+
+Config: `~/.config/meter/collector.env`. See
+[collector/README.md](collector/README.md) for the systemd timer.
+
+## Dashboard
+
+Next.js on Cloudflare Workers, D1 as the store, Next.js App Router.
+
+```sh
+cd dashboard
+npm install
+npx wrangler d1 create meter   # put the id in wrangler.jsonc
+npm run db:migrate
+npm run deploy
+```
+
+Secrets: `METER_TOKEN` (ingest + client bearer), `GOOGLE_CLIENT_ID` /
+`GOOGLE_CLIENT_SECRET`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and
+`ALLOWED_EMAILS`. The Google client must allow
+`https://meter.sam1.space/api/auth/callback/google`. See
+[dashboard/README.md](dashboard/README.md).
 
 ## Docs
 

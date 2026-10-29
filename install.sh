@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-swift build -c release
+swift build -c release --package-path menubar
 
 # Sign with a stable self-signed identity. Ad-hoc (linker-signed) binaries get a
 # new hash every build, which invalidates keychain ACLs and re-triggers
@@ -27,7 +27,7 @@ fi
 APP="$HOME/Applications/meter.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-cp -f .build/release/meter "$APP/Contents/MacOS/meter"
+cp -f menubar/.build/release/meter "$APP/Contents/MacOS/meter"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

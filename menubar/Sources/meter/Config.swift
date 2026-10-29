@@ -54,23 +54,33 @@ struct NotificationSettings: Codable, Equatable {
     }
 }
 
+struct CollectorConfig: Codable, Equatable {
+    var url: String = "https://meter.sam1.space"
+    var host: String = ""
+    var enabled: Bool = true
+}
+
 struct Config: Codable {
     var intervalMinutes: Int = 5
     var providers: [ProviderInstance] = []
     var notifications = NotificationSettings()
+    var collector: CollectorConfig?
     var configError: String?
 
     enum CodingKeys: String, CodingKey {
         case intervalMinutes = "interval_minutes"
         case providers
         case notifications
+        case collector
     }
 
     init(intervalMinutes: Int = 5, providers: [ProviderInstance] = [],
-         notifications: NotificationSettings = NotificationSettings(), configError: String? = nil) {
+         notifications: NotificationSettings = NotificationSettings(),
+         collector: CollectorConfig? = nil, configError: String? = nil) {
         self.intervalMinutes = intervalMinutes
         self.providers = providers
         self.notifications = notifications
+        self.collector = collector
         self.configError = configError
     }
 
@@ -79,6 +89,7 @@ struct Config: Codable {
         intervalMinutes = try c.decodeIfPresent(Int.self, forKey: .intervalMinutes) ?? 5
         providers = try c.decodeIfPresent([ProviderInstance].self, forKey: .providers) ?? []
         notifications = try c.decodeIfPresent(NotificationSettings.self, forKey: .notifications) ?? NotificationSettings()
+        collector = try c.decodeIfPresent(CollectorConfig.self, forKey: .collector)
         configError = nil
     }
 }

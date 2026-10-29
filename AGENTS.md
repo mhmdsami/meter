@@ -5,12 +5,17 @@ Notes for anyone (human or agent) working in this repo.
 ## Commands
 
 ```sh
-swift build                        # debug build
-swift test                         # unit tests
-swift build -c release             # release build
-.build/debug/meter --print         # one refresh cycle, table to stdout, exit code 0
-./install.sh                       # release build + LaunchAgent (app.meter.meter)
+swift build --package-path menubar                     # debug build
+swift test --package-path menubar                      # unit tests
+swift build -c release --package-path menubar          # release build
+menubar/.build/debug/meter --print                     # one refresh, table to stdout
+./install.sh                                           # release build + LaunchAgent
 launchctl kickstart -k gui/$(id -u)/app.meter.meter   # restart the running agent
+
+cd collector && cargo run -- --dry-run                 # scan this host, no push
+cd dashboard && npm run dev                            # dashboard + D1 locally
+cd dashboard && npm run db:migrate                      # apply D1 migrations
+cd dashboard && npm run deploy                         # deploy the Worker
 ```
 
 `--print` is the fastest way to exercise every enabled provider against
@@ -20,35 +25,42 @@ than unit tests; treat parser tests as the source of truth.
 ## Layout
 
 ```
-Sources/meter/
-  MeterApp.swift     @main, MenuBarExtra scene, accessory activation, bar title
-  Store.swift        main-actor state: config, readings, poll loop
-  Config.swift       config model + decode, keychain/env/auth key resolution
-  Keychain.swift     generic + internet-password reads, cached per launch
-  HTTP.swift         URLSession helpers, error types, ISO date parsing
-  Reading.swift      InstanceReading / UsageWindow models, aggregation
-  Providers.swift    registry: type string -> fetcher, fan-out, cost attachment
-   CostScan.swift     today-$ scans: Codex rollouts + gateway codex usage,
+menubar/
+  Package.swift
+  Sources/meter/
+    MeterApp.swift     @main, MenuBarExtra scene, accessory activation, bar title
+    Store.swift        main-actor state: config, readings, poll loop
+    Config.swift       config model + decode, keychain/env/auth key resolution
+    Keychain.swift     generic + internet-password reads, cached per launch
+    HTTP.swift         URLSession helpers, error types, ISO date parsing
+    Reading.swift      InstanceReading / UsageWindow models, aggregation
+    Providers.swift    registry: type string -> fetcher, fan-out, cost attachment
+    CostScan.swift     today-$ scans: Codex rollouts + gateway codex usage,
                       Claude projects + Desktop stores, opencode.db, pi/OMP
                       sessions, fx gateway log
-  Ledger.swift       writable sqlite: daily spend rows + quota snapshots
-  Dashboard.swift    static HTML dashboard rendered from the ledger
-  Notifier.swift     threshold alerts (pure decision + UNUserNotificationCenter)
-   Pricing.swift      models.dev price table, cached in ~/.cache/meter/models.json
-  SQLite.swift       thin readonly libsqlite3 wrapper
-  PrintMode.swift    --print / --json / --dashboard one-shot modes
-  MenuView.swift     dropdown rows, bars, countdowns
-  Providers/*.swift  one file per provider type (config `options` holds
+    Ledger.swift       writable sqlite: daily spend rows + quota snapshots
+    Dashboard.swift    static HTML dashboard rendered from the ledger
+    Notifier.swift     threshold alerts (pure decision + UNUserNotificationCenter)
+    Pricing.swift      models.dev price table, cached in ~/.cache/meter/models.json
+    SQLite.swift       thin readonly libsqlite3 wrapper
+    PrintMode.swift    --print / --json / --dashboard one-shot modes
+    MenuView.swift     dropdown rows, bars, countdowns
+    Providers/*.swift  one file per provider type (config `options` holds
                       provider-specific settings, e.g. Cloudflare account/gateway)
-Tests/MeterTests/    XCTest, no host app
+  Tests/MeterTests/    XCTest, no host app
+collector/           Rust agent for remote hosts (Cargo)
+dashboard/           Next.js dashboard + ingest/summary APIs (Cloudflare Workers + D1)
+docs/                user and development docs
+install.sh           menubar build + app bundle + LaunchAgent
 ```
 
 ## Conventions
 
 - Swift 5 language mode under a Swift 6 toolchain. No strict-concurrency
   churn; the store is @MainActor, fetchers are nonisolated async.
-- No third-party dependencies. System frameworks only (libsqlite3 is
-  linked in Package.swift).
+- The menubar has no third-party dependencies. System frameworks only
+  (libsqlite3 is linked in `menubar/Package.swift`). The collector and
+  dashboard are separate projects with their own dependencies.
 - Comments explain non-obvious constraints only (protocol quirks, stale
   file formats, why a fallback exists). Nothing else.
 - Never write to credential files owned by CLIs (`~/.codex/auth.json`,
@@ -67,7 +79,7 @@ Tests/MeterTests/    XCTest, no host app
 
 ## Adding a provider
 
-1. Create `Sources/meter/Providers/YourThing.swift` with a
+1. Create `menubar/Sources/meter/Providers/YourThing.swift` with a
    `static func fetch(_ instance: ProviderInstance) async throws -> InstanceReading`.
 2. Register it in `Providers.all`.
 3. Support a config key path if it needs credentials: `env:NAME`,
