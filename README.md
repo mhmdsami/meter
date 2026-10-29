@@ -83,6 +83,14 @@ Secrets: `METER_TOKEN` (ingest + client bearer), `GOOGLE_CLIENT_ID` /
 `https://meter.sam1.space/api/auth/callback/google`. See
 [dashboard/README.md](dashboard/README.md).
 
+The menubar only pushes its recent window, so older local history reaches D1
+through a one-time backfill:
+
+```sh
+node dashboard/scripts/backfill-ledger.mjs \
+  --db ~/.local/share/meter/usage.db --host mac --days 400
+```
+
 ## Docs
 
 - [Install](docs/install.md)

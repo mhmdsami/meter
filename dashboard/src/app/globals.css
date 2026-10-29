@@ -15,7 +15,7 @@
 
   --foreground: oklch(0.9577 0.0112 141.26);
   --text-secondary: oklch(0.7212 0.0189 169.85);
-  --text-tertiary: oklch(0.5812 0.0216 167.42);
+  --text-tertiary: oklch(0.64 0.0216 167.42);
 
   --primary: oklch(0.735 0.068 155);
   --primary-foreground: oklch(0.2252 0.0306 153.32);

@@ -24,9 +24,9 @@ export default async function LoginPage({
       />
       <div className="animate-fade-up relative w-full max-w-sm rounded-lg border border-border bg-card p-8 shadow-[var(--shadow-card)]">
         <h1 className="font-display text-3xl tracking-tight">meter</h1>
-        <p className="mt-1 text-xs text-tertiary">AI usage across machines</p>
+        <p className="mt-1 text-xs text-text-tertiary">AI usage across machines</p>
         <h2 className="mt-7 text-base font-medium">Sign in</h2>
-        <p className="mt-1 text-xs leading-5 text-muted">Access is limited to approved accounts.</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">Access is limited to approved accounts.</p>
         <div className="mt-6">
           {googleConfigured() ? (
             <GoogleSignIn next={next} />
