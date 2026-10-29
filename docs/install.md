@@ -18,7 +18,7 @@ The script builds a release binary, packages it at
 login and restarts it if it exits.
 
 It also links `~/.local/bin/meter` to the bundle's executable, which is how
-the `--print`, `--json`, `--dashboard`, and `--test-notify` modes are meant to
+the `--print`, `--json`, and `--test-notify` modes are meant to
 be run. Make sure `~/.local/bin` is on your `PATH`.
 
 ## Code signing

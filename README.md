@@ -29,7 +29,7 @@ not one.
 The dropdown lists one row per instance: quota windows with reset countdowns,
 credit balances, today's spend, and errors. There is no settings window;
 configuration is `~/.config/meter/config.json`. A local SQLite ledger records
-daily totals and powers the offline dashboard.
+daily totals and powers the menubar's history.
 
 ```sh
 ./install.sh
@@ -42,9 +42,11 @@ Claude Code or Zed; choose **Always Allow**.
 ```sh
 meter --print        # one refresh, table to stdout
 meter --json         # the same data as JSON
-meter --dashboard    # render the local ledger as HTML and open it
 meter --test-notify  # ask for notification permission and send a test
 ```
+
+The **Dashboard** button in the menu opens the hosted dashboard at
+<https://meter.sam1.space>.
 
 SwiftUI and SwiftPM, no third-party dependencies, macOS 14 or later.
 

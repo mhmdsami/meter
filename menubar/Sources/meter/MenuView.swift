@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct MenuContent: View {
@@ -48,7 +49,11 @@ struct MenuContent: View {
                 }
                 .disabled(store.isRefreshing)
                 Spacer()
-                Button("Dashboard") { Dashboard.writeAndOpen(days: 30) }
+                Button("Dashboard") {
+                    if let url = URL(string: "https://meter.sam1.space") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
                 Button("Config") { NSWorkspace.shared.open(ConfigStore.url) }
                 Button("Quit") { NSApp.terminate(nil) }
             }

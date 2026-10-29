@@ -39,11 +39,10 @@ menubar/
                       Claude projects + Desktop stores, opencode.db, pi/OMP
                       sessions, fx gateway log
     Ledger.swift       writable sqlite: daily spend rows + quota snapshots
-    Dashboard.swift    static HTML dashboard rendered from the ledger
     Notifier.swift     threshold alerts (pure decision + UNUserNotificationCenter)
     Pricing.swift      models.dev price table, cached in ~/.cache/meter/models.json
     SQLite.swift       thin readonly libsqlite3 wrapper
-    PrintMode.swift    --print / --json / --dashboard one-shot modes
+    PrintMode.swift    --print / --json one-shot modes
     MenuView.swift     dropdown rows, bars, countdowns
     Providers/*.swift  one file per provider type (config `options` holds
                       provider-specific settings, e.g. Cloudflare account/gateway)

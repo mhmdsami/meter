@@ -30,11 +30,10 @@ menubar/
   Providers.swift    registry, fan-out, local cost attribution
   CostScan.swift     local log and database scans
   Ledger.swift       SQLite ledger writes and reads
-  Dashboard.swift    static HTML from the ledger
   Notifier.swift     threshold alerts
   Pricing.swift      models.dev price table
   SQLite.swift       small read-only SQLite wrapper
-  PrintMode.swift    --print / --json / --dashboard
+  PrintMode.swift    --print / --json
   MenuView.swift     dropdown rows and bars
   Providers/*.swift  one file per provider type
   Tests/MeterTests/    XCTest, no host app

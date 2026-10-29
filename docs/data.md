@@ -38,19 +38,12 @@ or already-pruned history visible without double-counting the current scans.
 
 ## Dashboard
 
-```sh
-meter --dashboard
-meter --dashboard --days 30
-```
+The dashboard is hosted at <https://meter.sam1.space>. It reads the Cloudflare
+D1 store that the menubar and collector push to, so it shows every host, and
+signs in with Google. The menu's Dashboard button opens it.
 
-This renders the ledger to a self-contained HTML file at
-`~/.local/share/meter/dashboard.html` and opens it. It has spend cards, daily
-bars per provider, burn-rate estimates from recent quota snapshots, spend by
-project and model, and a per-day table. The menu's Dashboard button does the
-same thing.
-
-The page is generated locally and has no network dependencies. Re-run the
-command (or click the button) to refresh it.
+The local ledger still powers the menubar's today total, history bars, and
+notifications; it no longer renders HTML.
 
 ## Files
 
@@ -58,7 +51,6 @@ command (or click the button) to refresh it.
 | --- | --- |
 | `~/.config/meter/config.json` | providers and settings |
 | `~/.local/share/meter/usage.db` | the ledger |
-| `~/.local/share/meter/dashboard.html` | last rendered dashboard |
 | `~/.cache/meter/models.json` | models.dev price table |
 | `~/.cache/meter/readings.json` | last readings, so the bar doesn't blank on launch |
 

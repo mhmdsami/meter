@@ -3,23 +3,17 @@ import Foundation
 enum PrintMode {
     /// One-shot CLI modes; any of these skips the menu bar app entirely.
     static var requested: Bool {
-        CommandLine.arguments.contains { ["--print", "--json", "--dashboard", "--test-notify"].contains($0) }
+        CommandLine.arguments.contains { ["--print", "--json", "--test-notify"].contains($0) }
     }
 
     static func runAndExit() -> Never {
         let args = CommandLine.arguments
         let json = args.contains("--json")
-        let dashboard = args.contains("--dashboard")
         if args.contains("--test-notify") {
             Notifier.sendTest()  // exits from the authorization callback
             dispatchMain()
         }
         Task.detached {
-            if dashboard {
-                Dashboard.writeAndOpen(days: intArg("--days") ?? 90)
-                Antigravity.shutdown()
-                exit(0)
-            }
             let config = ConfigStore.load()
             let types = Set(config.providers.filter(\.enabled).map(\.type))
             let spend = await CostScan.spendTotals(days: 30, types: types, pricing: await Pricing.load())
@@ -67,7 +61,7 @@ enum PrintMode {
         return lines.joined(separator: "\n")
     }
 
-    /// Machine-readable snapshot for scripts and the dashboard.
+    /// Machine-readable snapshot for scripts.
     static func encode(config: Config, readings: [InstanceReading], history: [Store.HistoryLine]) -> String {
         let iso = ISO8601DateFormatter()
         var root: [String: Any] = [
