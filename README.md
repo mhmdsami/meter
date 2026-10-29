@@ -91,6 +91,21 @@ node dashboard/scripts/backfill-ledger.mjs \
   --db ~/.local/share/meter/usage.db --host mac --days 400
 ```
 
+## Gates and deploy
+
+`npm install` at the repo root installs biome and lefthook and wires the git
+hooks: pre-commit lints staged JS/TS/JSON, pre-push runs the full gate.
+
+```sh
+npm run gate     # biome + tsc + next build, swift build + test, cargo fmt/clippy/test
+npm run smoke    # checks health, login, 401s, and that /preview is prod-only
+```
+
+`.github/workflows/ci.yml` runs the same legs on PRs. Pushes to `main` deploy
+through `.github/workflows/deploy.yml` (typecheck, D1 migrations,
+`opennextjs-cloudflare deploy`, smoke). It needs the `CLOUDFLARE_API_TOKEN`
+secret and the `CLOUDFLARE_ACCOUNT_ID` variable.
+
 ## Docs
 
 - [Install](docs/install.md)

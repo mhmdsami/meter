@@ -1,5 +1,6 @@
 import { db, env } from "@/lib/env";
 import type { UsageRow } from "./types";
+
 export { db, env };
 
 export const MAX_DAYS = 366;

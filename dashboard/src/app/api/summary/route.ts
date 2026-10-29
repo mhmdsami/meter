@@ -1,5 +1,5 @@
 import { authed } from "@/lib/access";
-import { MAX_DAYS, env, localToday, validDay } from "@/lib/db";
+import { env, localToday, MAX_DAYS, validDay } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +15,8 @@ export async function GET(request: Request) {
   const start = since.toISOString().slice(0, 10);
   const excludeHost = url.searchParams.get("exclude_host");
 
-  const { results } = await env().DB
-    .prepare(
+  const { results } = await env()
+    .DB.prepare(
       `SELECT day, host, provider, SUM(spent) AS spent, SUM(tokens) AS tokens
        FROM usage_rows
        WHERE day >= ? AND day <= ?${excludeHost ? " AND host != ?" : ""}

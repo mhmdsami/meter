@@ -1,0 +1,53 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: meter-prod
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: dashboard
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - run: npm ci
+
+      - name: Check credentials
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Set the CLOUDFLARE_API_TOKEN secret and CLOUDFLARE_ACCOUNT_ID variable."
+            exit 1
+          fi
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=low --omit=dev
+
+      - name: Typecheck
+        run: npm run types
+
+      - name: Apply D1 migrations
+        run: npx wrangler d1 migrations apply meter --remote
+
+      - name: Deploy to Cloudflare Workers
+        run: npm run deploy
+
+      - name: Smoke test
+        run: npm run smoke

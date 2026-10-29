@@ -5,6 +5,11 @@ Notes for anyone (human or agent) working in this repo.
 ## Commands
 
 ```sh
+npm install                                            # biome + lefthook, installs git hooks
+npm run gate                                           # lint + types + build + tests, all languages
+npm run lint                                           # biome over dashboard + scripts
+npm run smoke                                          # hit the deployed Worker
+npm run deploy                                         # Cloudflare deploy (dashboard)
 swift build --package-path menubar                     # debug build
 swift test --package-path menubar                      # unit tests
 swift build -c release --package-path menubar          # release build
@@ -14,13 +19,33 @@ launchctl kickstart -k gui/$(id -u)/app.meter.meter   # restart the running agen
 
 cd collector && cargo run -- --dry-run                 # scan this host, no push
 cd dashboard && npm run dev                            # dashboard + D1 locally
-cd dashboard && npm run db:migrate                      # apply D1 migrations
-cd dashboard && npm run deploy                         # deploy the Worker
+cd dashboard && npm run db:migrate                     # apply D1 migrations
 ```
+
+`npm run gate` is what pre-push and CI run. The collector leg skips itself
+when cargo is not installed; CI has the toolchain, this Mac may not.
+`npm run smoke` defaults to `https://meter.sam1.space` and accepts
+`SMOKE_URL` for a local run.
 
 `--print` is the fastest way to exercise every enabled provider against
 live credentials. Network and keychain state make integration flakier
 than unit tests; treat parser tests as the source of truth.
+
+## Gates
+
+`lefthook.yml` wires two hooks: pre-commit runs `biome check` on staged
+JS/TS/JSON, pre-push runs `npm run gate`. Hooks come from `npm install` at the
+repo root; never `--no-verify` around them, fix the gate instead.
+
+- **dashboard**: `biome check`, `tsc --noEmit`, `next build`.
+- **menubar**: `swift build`, `swift test`.
+- **collector**: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`.
+
+`.github/workflows/ci.yml` runs the same three legs on every PR and push.
+`.github/workflows/deploy.yml` ships to Cloudflare on pushes to `main`:
+typecheck, D1 migrations, `opennextjs-cloudflare deploy`, then `npm run smoke`.
+It needs `CLOUDFLARE_API_TOKEN` (secret) and `CLOUDFLARE_ACCOUNT_ID`
+(variable). Deploys to the dashboard are not run by hand.
 
 ## Layout
 

@@ -6,11 +6,7 @@ import { GoogleSignIn } from "./google-signin";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Sign in" };
 
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string }>;
-}) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const { next } = await searchParams;
   const session = await auth().api.getSession({ headers: await headers() });
   if (session) redirect("/");
@@ -32,9 +28,8 @@ export default async function LoginPage({
             <GoogleSignIn next={next} />
           ) : (
             <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs leading-5 text-destructive">
-              Google OAuth is not configured. Set <code>GOOGLE_CLIENT_ID</code> and{" "}
-              <code>GOOGLE_CLIENT_SECRET</code> on the Worker with the real values from
-              Google Cloud Console.
+              Google OAuth is not configured. Set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> on
+              the Worker with the real values from Google Cloud Console.
             </p>
           )}
         </div>

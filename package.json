@@ -1,0 +1,27 @@
+{
+  "name": "meter",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "gate": "npm run lint && npm run gate:dashboard && npm run gate:menubar && npm run gate:collector",
+    "gate:dashboard": "npm --prefix dashboard run types && npm --prefix dashboard run build",
+    "gate:menubar": "swift build --package-path menubar && swift test --package-path menubar",
+    "gate:collector": "node scripts/gate-collector.mjs",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "smoke": "npm --prefix dashboard run smoke",
+    "deploy": "npm --prefix dashboard run deploy",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.3",
+    "lefthook": "^2.2.2"
+  },
+  "allowScripts": {
+    "lefthook@2.2.2": true
+  }
+}

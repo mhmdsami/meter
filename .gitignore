@@ -4,12 +4,16 @@
 .swiftpm/
 Package.resolved
 
+# gate tooling
+node_modules/
+
 # dashboard
 dashboard/node_modules/
 dashboard/.next/
 dashboard/.open-next/
 dashboard/.dev.vars
 dashboard/.wrangler/
+dashboard/tsconfig.tsbuildinfo
 
 # collector
 collector/target/

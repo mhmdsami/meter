@@ -8,6 +8,7 @@
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "db:migrate": "wrangler d1 migrations apply meter --remote",
     "types": "tsc --noEmit",
+    "smoke": "node scripts/smoke.mjs",
     "db:migrate:local": "wrangler d1 migrations apply meter --local"
   },
   "dependencies": {

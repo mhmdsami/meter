@@ -1,18 +1,10 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { LogOut } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useId, useMemo, useState } from "react";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
@@ -253,12 +245,14 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
     return map;
   }, [providers]);
 
+  // biome-ignore lint/complexity/useMathMinMax: compares ISO day strings, not numbers
   const latest = useMemo(() => rows.reduce((max, row) => (row.day > max ? row.day : max), today), [rows, today]);
   const todayKey = rows.some((row) => row.day === today) ? today : latest;
   const yesterdayKey = shiftDay(todayKey, -1);
 
   const inScope = useMemo(
-    () => rows.filter((row) => (host === "all" || row.host === host) && (provider === "all" || row.provider === provider)),
+    () =>
+      rows.filter((row) => (host === "all" || row.host === host) && (provider === "all" || row.provider === provider)),
     [rows, host, provider],
   );
 
@@ -275,9 +269,7 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
   const todayTotal = todayRows.reduce((sum, row) => sum + row.spent, 0);
   const yesterdayTotal = yesterdayRows.reduce((sum, row) => sum + row.spent, 0);
   const delta = yesterdayTotal > 0 ? ((todayTotal - yesterdayTotal) / yesterdayTotal) * 100 : null;
-  const last7 = inScope
-    .filter((row) => row.day >= dayString(-6))
-    .reduce((sum, row) => sum + row.spent, 0);
+  const last7 = inScope.filter((row) => row.day >= dayString(-6)).reduce((sum, row) => sum + row.spent, 0);
 
   const series = useMemo(() => {
     const byDay = new Map<string, Map<string, number>>();
@@ -358,8 +350,7 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
     }
     return {
       total: window.map((day) => ({ value: totals.get(day) ?? 0 })),
-      provider: (name: string) =>
-        window.map((day) => ({ value: perProvider.get(name)?.get(day) ?? 0 })),
+      provider: (name: string) => window.map((day) => ({ value: perProvider.get(name)?.get(day) ?? 0 })),
     };
   }, [inScope]);
 
@@ -399,7 +390,9 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
             ))}
           </div>
           <div className="hidden items-center gap-2 rounded-md border border-border py-1 pl-1 pr-2 sm:flex">
-            <span className="grid size-6 place-items-center rounded-sm bg-surface-2 text-2xs font-medium">{initials}</span>
+            <span className="grid size-6 place-items-center rounded-sm bg-surface-2 text-2xs font-medium">
+              {initials}
+            </span>
             <span className="max-w-40 truncate text-xs text-muted-foreground">{user.email}</span>
           </div>
           <Button variant="ghost" size="icon" onClick={signOut} title="Sign out">
@@ -414,11 +407,7 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
         <StatCard
           label="Today"
           value={money(todayTotal)}
-          sub={
-            delta === null
-              ? todayKey
-              : `${delta >= 0 ? "+" : ""}${delta.toFixed(0)}% vs yesterday`
-          }
+          sub={delta === null ? todayKey : `${delta >= 0 ? "+" : ""}${delta.toFixed(0)}% vs yesterday`}
           className="sm:col-span-2"
           delay={0}
         >
@@ -436,7 +425,12 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
         </StatCard>
         <StatCard label="Last 7 days" value={money(last7)} sub="across all filtered hosts" delay={60} />
         <div className="grid grid-cols-2 gap-3 sm:col-span-2 lg:col-span-1 lg:grid-cols-2">
-          <StatCard label={`Last ${days}d`} value={money(rangeTotal)} sub={`${filtered.length.toLocaleString()} rows`} delay={120} />
+          <StatCard
+            label={`Last ${days}d`}
+            value={money(rangeTotal)}
+            sub={`${filtered.length.toLocaleString()} rows`}
+            delay={120}
+          />
           <StatCard label="Tokens" value={compact(rangeTokens)} sub="input + output + cache" delay={180} />
         </div>
       </section>
@@ -448,12 +442,7 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
             All
           </Button>
           {hosts.map((name, index) => (
-            <Button
-              key={name}
-              size="xs"
-              variant={host === name ? "secondary" : "ghost"}
-              onClick={() => setHost(name)}
-            >
+            <Button key={name} size="xs" variant={host === name ? "secondary" : "ghost"} onClick={() => setHost(name)}>
               <span className="size-1.5 rounded-full" style={{ background: HOST_COLORS[index % HOST_COLORS.length] }} />
               {name}
             </Button>
@@ -616,9 +605,15 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="h-8 px-0 text-2xs uppercase tracking-[0.08em] text-text-tertiary">{title.replace("By ", "")}</TableHead>
-                      <TableHead className="h-8 px-0 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary">Spend</TableHead>
-                      <TableHead className="h-8 px-0 pl-4 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary">Share</TableHead>
+                      <TableHead className="h-8 px-0 text-2xs uppercase tracking-[0.08em] text-text-tertiary">
+                        {title.replace("By ", "")}
+                      </TableHead>
+                      <TableHead className="h-8 px-0 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary">
+                        Spend
+                      </TableHead>
+                      <TableHead className="h-8 px-0 pl-4 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary">
+                        Share
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -629,7 +624,9 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
                             {label}
                           </span>
                         </TableCell>
-                        <TableCell className="whitespace-nowrap px-0 py-2 text-right text-xs tabular-nums">{money(bucket.spent)}</TableCell>
+                        <TableCell className="whitespace-nowrap px-0 py-2 text-right text-xs tabular-nums">
+                          {money(bucket.spent)}
+                        </TableCell>
                         <TableCell className="px-0 py-2 pl-4">
                           <Share value={bucket.spent} total={rangeTotal} />
                         </TableCell>
@@ -637,14 +634,19 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
                     ))}
                   </TableBody>
                 </Table>
-                {rows.length === 0 ? <p className="mt-2 text-xs text-muted-foreground">No rows in this range.</p> : null}
+                {rows.length === 0 ? (
+                  <p className="mt-2 text-xs text-muted-foreground">No rows in this range.</p>
+                ) : null}
               </div>
             </div>
           );
         })}
       </section>
 
-      <section className="animate-fade-up mt-4 rounded-lg border border-border bg-card p-4 shadow-[var(--shadow-card)]" style={{ animationDelay: "120ms" }}>
+      <section
+        className="animate-fade-up mt-4 rounded-lg border border-border bg-card p-4 shadow-[var(--shadow-card)]"
+        style={{ animationDelay: "120ms" }}
+      >
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium">Daily</h2>
           <span className="text-2xs text-muted-foreground">{daily.length} days</span>
@@ -654,9 +656,15 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
             <TableHeader>
               <TableRow>
                 <TableHead className="h-8 px-0 text-2xs uppercase tracking-[0.08em] text-text-tertiary">Day</TableHead>
-                <TableHead className="h-8 px-0 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary">Spend</TableHead>
-                <TableHead className="hidden h-8 px-0 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary sm:table-cell">Tokens</TableHead>
-                <TableHead className="hidden h-8 px-0 text-2xs uppercase tracking-[0.08em] text-text-tertiary sm:table-cell">Hosts</TableHead>
+                <TableHead className="h-8 px-0 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary">
+                  Spend
+                </TableHead>
+                <TableHead className="hidden h-8 px-0 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary sm:table-cell">
+                  Tokens
+                </TableHead>
+                <TableHead className="hidden h-8 px-0 text-2xs uppercase tracking-[0.08em] text-text-tertiary sm:table-cell">
+                  Hosts
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -669,21 +677,29 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
                         .sort((a, b) => b[1] - a[1])
                         .map(([name, value], index) => (
                           <Badge key={name} variant="outline" className="gap-1.5 text-2xs">
-                            <span className="size-1.5 rounded-full" style={{ background: HOST_COLORS[index % HOST_COLORS.length] }} />
+                            <span
+                              className="size-1.5 rounded-full"
+                              style={{ background: HOST_COLORS[index % HOST_COLORS.length] }}
+                            />
                             {name} {money(value)}
                           </Badge>
                         ))}
                     </div>
                   </TableCell>
                   <TableCell className="px-0 py-2 text-right text-xs tabular-nums">{money(entry.spent)}</TableCell>
-                  <TableCell className="hidden px-0 py-2 text-right text-xs tabular-nums text-muted-foreground sm:table-cell">{compact(entry.tokens)}</TableCell>
+                  <TableCell className="hidden px-0 py-2 text-right text-xs tabular-nums text-muted-foreground sm:table-cell">
+                    {compact(entry.tokens)}
+                  </TableCell>
                   <TableCell className="hidden px-0 py-2 sm:table-cell">
                     <div className="flex flex-wrap gap-1">
                       {[...entry.hosts.entries()]
                         .sort((a, b) => b[1] - a[1])
                         .map(([name, value], index) => (
                           <Badge key={name} variant="outline" className="gap-1.5">
-                            <span className="size-1.5 rounded-full" style={{ background: HOST_COLORS[index % HOST_COLORS.length] }} />
+                            <span
+                              className="size-1.5 rounded-full"
+                              style={{ background: HOST_COLORS[index % HOST_COLORS.length] }}
+                            />
                             {name} {money(value)}
                           </Badge>
                         ))}
@@ -697,14 +713,13 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
             <div className="mt-6 rounded-md border border-dashed border-border p-6 text-center">
               <p className="text-sm">No usage yet.</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Push rows from a host: <code className="rounded bg-surface-2 px-1.5 py-0.5">meter-collector</code> on space,
-                or the menubar app on your Mac.
+                Push rows from a host: <code className="rounded bg-surface-2 px-1.5 py-0.5">meter-collector</code> on
+                space, or the menubar app on your Mac.
               </p>
             </div>
           ) : null}
         </div>
       </section>
-
     </main>
   );
 }

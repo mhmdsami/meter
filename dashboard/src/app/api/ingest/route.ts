@@ -26,7 +26,15 @@ export async function POST(request: Request) {
   const now = new Date().toISOString();
   // Scans emit one row per log file; several files can share a key. Sum them
   // first (the ledger does the same) or the primary key rejects the insert.
-  type Merged = { day: string; provider: string; project: string; model: string; spent: number; tokens: number; source: string };
+  type Merged = {
+    day: string;
+    provider: string;
+    project: string;
+    model: string;
+    spent: number;
+    tokens: number;
+    source: string;
+  };
   const merged = new Map<string, Merged>();
   for (const raw of payload.rows as IncomingRow[]) {
     const day = String(raw.day ?? "");
@@ -98,9 +106,6 @@ export async function POST(request: Request) {
       days: [...new Set([...groups.values()].map((list) => list[0][0]))].sort(),
     });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : String(error) },
-      { status: 500 },
-    );
+    return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }

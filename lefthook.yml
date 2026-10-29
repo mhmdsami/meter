@@ -1,0 +1,12 @@
+# Hooks are installed by `npm install` (see the prepare script in package.json).
+pre-commit:
+  parallel: true
+  commands:
+    lint:
+      glob: "*.{ts,tsx,js,mjs,cjs,json,jsonc}"
+      run: npx biome check --staged --no-errors-on-unmatched
+
+pre-push:
+  commands:
+    gate:
+      run: npm run gate
