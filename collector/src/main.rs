@@ -60,11 +60,17 @@ fn main() {
     let config = load_config();
     let dry_run = std::env::args().any(|a| a == "--dry-run");
     if config.token.is_empty() && !dry_run {
-        eprintln!("meter-collector: METER_TOKEN is not set ({})", env_file().display());
+        eprintln!(
+            "meter-collector: METER_TOKEN is not set ({})",
+            env_file().display()
+        );
         std::process::exit(2);
     }
     if config.url.is_empty() && !dry_run {
-        eprintln!("meter-collector: METER_URL is not set ({})", env_file().display());
+        eprintln!(
+            "meter-collector: METER_URL is not set ({})",
+            env_file().display()
+        );
         std::process::exit(2);
     }
 
@@ -85,9 +91,19 @@ fn main() {
     let mut rows: Vec<Row> = Vec::new();
     rows.extend(scan::opencode(&config.host, &oc_path, since_ms, &pricing));
     rows.extend(scan::pi(&config.host, &pi_roots, since_ms, &pricing));
-    rows.extend(scan::claude(&config.host, &claude_roots, since_ms, &pricing));
+    rows.extend(scan::claude(
+        &config.host,
+        &claude_roots,
+        since_ms,
+        &pricing,
+    ));
     rows.sort_by(|a, b| {
-        (&a.day, &a.provider, &a.project, &a.model).cmp(&(&b.day, &b.provider, &b.project, &b.model))
+        (&a.day, &a.provider, &a.project, &a.model).cmp(&(
+            &b.day,
+            &b.provider,
+            &b.project,
+            &b.model,
+        ))
     });
 
     let payload = serde_json::json!({
@@ -127,9 +143,11 @@ fn main() {
     let endpoint = format!("{}/api/ingest", config.url.trim_end_matches('/'));
     let output = Command::new("curl")
         .args(["-fsS", "--max-time", "30", "-X", "POST"])
-        .arg("-H").arg(format!("Authorization: Bearer {}", config.token))
+        .arg("-H")
+        .arg(format!("Authorization: Bearer {}", config.token))
         .args(["-H", "Content-Type: application/json"])
-        .arg("--data-binary").arg(format!("@{}", tmp.display()))
+        .arg("--data-binary")
+        .arg(format!("@{}", tmp.display()))
         .arg(&endpoint)
         .output();
     let _ = fs::remove_file(&tmp);

@@ -18,13 +18,28 @@ pub struct Pricing {
 }
 
 const OFFICIAL: &[&str] = &[
-    "anthropic", "openai", "google", "google-vertex", "azure", "xai",
-    "moonshotai", "deepseek", "zai", "minimax", "qwen", "mistral",
+    "anthropic",
+    "openai",
+    "google",
+    "google-vertex",
+    "azure",
+    "xai",
+    "moonshotai",
+    "deepseek",
+    "zai",
+    "minimax",
+    "qwen",
+    "mistral",
 ];
 
 fn parse_cost(v: &Value) -> Cost {
     let n = |key: &str| v.get(key).and_then(Value::as_f64).unwrap_or(0.0);
-    Cost { input: n("input"), output: n("output"), cache_read: n("cache_read"), cache_write: n("cache_write") }
+    Cost {
+        input: n("input"),
+        output: n("output"),
+        cache_read: n("cache_read"),
+        cache_write: n("cache_write"),
+    }
 }
 
 fn beats(candidate: Cost, official: bool, existing: Cost, existing_official: bool) -> bool {
@@ -43,11 +58,15 @@ impl Pricing {
         let mut by_provider: HashMap<String, HashMap<String, Cost>> = HashMap::new();
         if let Value::Object(providers) = &root {
             for (provider, body) in providers {
-                let Some(model_map) = body.get("models").and_then(Value::as_object) else { continue };
+                let Some(model_map) = body.get("models").and_then(Value::as_object) else {
+                    continue;
+                };
                 let official = OFFICIAL.contains(&provider.as_str());
                 let entry = by_provider.entry(provider.to_lowercase()).or_default();
                 for (id, model) in model_map {
-                    let Some(cost) = model.get("cost") else { continue };
+                    let Some(cost) = model.get("cost") else {
+                        continue;
+                    };
                     let parsed = parse_cost(cost);
                     let key = id.to_lowercase();
                     entry.insert(key.clone(), parsed);
@@ -60,13 +79,20 @@ impl Pricing {
                 }
             }
         }
-        Pricing { models, by_provider }
+        Pricing {
+            models,
+            by_provider,
+        }
     }
 
     pub fn cost(&self, model: &str, provider: Option<&str>) -> Option<Cost> {
         let base = model.to_lowercase();
         if let Some(provider) = provider {
-            if let Some(cost) = self.by_provider.get(&provider.to_lowercase()).and_then(|m| m.get(&base)) {
+            if let Some(cost) = self
+                .by_provider
+                .get(&provider.to_lowercase())
+                .and_then(|m| m.get(&base))
+            {
                 return Some(*cost);
             }
         }
@@ -79,13 +105,22 @@ impl Pricing {
         })
     }
 
-    pub fn claude(&self, cost: Cost, input: f64, cache_read: f64, cache_write: f64, output: f64) -> f64 {
+    pub fn claude(
+        &self,
+        cost: Cost,
+        input: f64,
+        cache_read: f64,
+        cache_write: f64,
+        output: f64,
+    ) -> f64 {
         input / 1e6 * cost.input
             + cache_read / 1e6 * cost.cache_read
             + cache_write / 1e6 * cost.cache_write
             + output / 1e6 * cost.output
     }
 
+    // Codex rollouts are not scanned yet; the rate shape is kept for them.
+    #[allow(dead_code)]
     pub fn codex(&self, cost: Cost, input: f64, cached_input: f64, output: f64) -> f64 {
         let cached = cached_input.min(input);
         (input - cached) / 1e6 * cost.input
@@ -108,7 +143,13 @@ fn refresh(cache: &Path) {
     let _ = fs::create_dir_all(dir);
     let tmp = cache.with_extension("json.tmp");
     let ok = Command::new("curl")
-        .args(["-fsSL", "--max-time", "30", "https://models.dev/api.json", "-o"])
+        .args([
+            "-fsSL",
+            "--max-time",
+            "30",
+            "https://models.dev/api.json",
+            "-o",
+        ])
         .arg(&tmp)
         .status()
         .map(|s| s.success())

@@ -102,7 +102,9 @@ pub fn opencode(host: &str, path: &Path, since_ms: i64, pricing: &Pricing) -> Ve
         .arg(path)
         .arg(since_ms.to_string())
         .output();
-    let Ok(output) = output else { return Vec::new() };
+    let Ok(output) = output else {
+        return Vec::new();
+    };
     if !output.status.success() {
         eprintln!("opencode: {}", String::from_utf8_lossy(&output.stderr));
         return Vec::new();
@@ -122,7 +124,9 @@ pub fn opencode(host: &str, path: &Path, since_ms: i64, pricing: &Pricing) -> Ve
             let spent = if estimated {
                 pricing
                     .cost(&model, Some(&provider_id))
-                    .map(|cost| pricing.claude(cost, input, cache_read, cache_write, output + reasoning))
+                    .map(|cost| {
+                        pricing.claude(cost, input, cache_read, cache_write, output + reasoning)
+                    })
                     .unwrap_or(0.0)
             } else {
                 reported
@@ -195,9 +199,13 @@ pub fn pi(host: &str, roots: &[PathBuf], since_ms: i64, pricing: &Pricing) -> Ve
     }
     let mut best: HashMap<String, PiMsg> = HashMap::new();
     for (file_idx, file) in files.iter().enumerate() {
-        let Ok(text) = fs::read_to_string(file) else { continue };
+        let Ok(text) = fs::read_to_string(file) else {
+            continue;
+        };
         for (line_idx, line) in text.lines().enumerate() {
-            let Ok(obj) = serde_json::from_str::<PiLine>(line) else { continue };
+            let Ok(obj) = serde_json::from_str::<PiLine>(line) else {
+                continue;
+            };
             if obj.kind.as_deref() != Some("message") {
                 continue;
             }
@@ -206,8 +214,12 @@ pub fn pi(host: &str, roots: &[PathBuf], since_ms: i64, pricing: &Pricing) -> Ve
                 continue;
             }
             let Some(usage) = message.usage else { continue };
-            let Some(timestamp) = obj.timestamp.as_deref() else { continue };
-            let Some(day) = local_day(timestamp) else { continue };
+            let Some(timestamp) = obj.timestamp.as_deref() else {
+                continue;
+            };
+            let Some(day) = local_day(timestamp) else {
+                continue;
+            };
             let ts_ms = OffsetDateTime::parse(timestamp, &Rfc3339)
                 .map(|t| (t.unix_timestamp_nanos() / 1_000_000) as i64)
                 .unwrap_or(0);
@@ -248,7 +260,8 @@ pub fn pi(host: &str, roots: &[PathBuf], since_ms: i64, pricing: &Pricing) -> Ve
     best.into_values()
         .filter_map(|msg| {
             let cost = pricing.cost(&msg.model, None)?;
-            let spent = pricing.claude(cost, msg.input, msg.cache_read, msg.cache_write, msg.output);
+            let spent =
+                pricing.claude(cost, msg.input, msg.cache_read, msg.cache_write, msg.output);
             let tokens = (msg.input + msg.output + msg.cache_read + msg.cache_write) as i64;
             if spent <= 0.004 && tokens == 0 {
                 return None;
@@ -314,16 +327,24 @@ pub fn claude(host: &str, roots: &[PathBuf], since_ms: i64, pricing: &Pricing) -
     }
     let mut best: HashMap<String, ClaudeMsg> = HashMap::new();
     for file in files {
-        let Ok(text) = fs::read_to_string(&file) else { continue };
+        let Ok(text) = fs::read_to_string(&file) else {
+            continue;
+        };
         for line in text.lines() {
-            let Ok(obj) = serde_json::from_str::<ClaudeLine>(line) else { continue };
+            let Ok(obj) = serde_json::from_str::<ClaudeLine>(line) else {
+                continue;
+            };
             if obj.kind.as_deref() != Some("assistant") {
                 continue;
             }
             let Some(message) = obj.message else { continue };
             let Some(usage) = message.usage else { continue };
-            let Some(timestamp) = obj.timestamp.as_deref() else { continue };
-            let Some(day) = local_day(timestamp) else { continue };
+            let Some(timestamp) = obj.timestamp.as_deref() else {
+                continue;
+            };
+            let Some(day) = local_day(timestamp) else {
+                continue;
+            };
             let ts_ms = OffsetDateTime::parse(timestamp, &Rfc3339)
                 .map(|t| (t.unix_timestamp_nanos() / 1_000_000) as i64)
                 .unwrap_or(0);
@@ -367,7 +388,8 @@ pub fn claude(host: &str, roots: &[PathBuf], since_ms: i64, pricing: &Pricing) -
     best.into_values()
         .filter_map(|msg| {
             let cost = pricing.cost(&msg.model, None)?;
-            let spent = pricing.claude(cost, msg.input, msg.cache_read, msg.cache_write, msg.output);
+            let spent =
+                pricing.claude(cost, msg.input, msg.cache_read, msg.cache_write, msg.output);
             let tokens = (msg.input + msg.output + msg.cache_read + msg.cache_write) as i64;
             if spent <= 0.004 && tokens == 0 {
                 return None;
@@ -387,7 +409,9 @@ pub fn claude(host: &str, roots: &[PathBuf], since_ms: i64, pricing: &Pricing) -
 }
 
 pub fn walk_jsonl(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
