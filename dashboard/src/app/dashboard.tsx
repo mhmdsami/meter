@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
@@ -200,6 +200,7 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
   const [provider, setProvider] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
 
   const today = dayString(0);
 
@@ -319,6 +320,12 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
     return map;
   }, [filtered]);
 
+  const pageSize = 15;
+
+  // Filters change the row set, so paging starts over.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: resets on filter changes, not page edits
+  useEffect(() => setPage(0), [days, host, provider]);
+
   const daily = useMemo(() => {
     const map = new Map<string, { spent: number; tokens: number; hosts: Map<string, number> }>();
     for (const row of filtered) {
@@ -330,6 +337,10 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
     }
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [filtered]);
+
+  const pageCount = Math.max(1, Math.ceil(daily.length / pageSize));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageRows = daily.slice(currentPage * pageSize, currentPage * pageSize + pageSize);
 
   const providerList = useMemo(
     () => [...providerTotals.entries()].sort((a, b) => b[1].spent - a[1].spent),
@@ -638,29 +649,61 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
         style={{ animationDelay: "120ms" }}
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium">Daily</h2>
-          <span className="text-2xs text-muted-foreground">{daily.length} days</span>
+          <div className="flex items-baseline gap-2">
+            <h2 className="text-sm font-medium">Daily</h2>
+            <span className="text-2xs text-muted-foreground">{daily.length} days</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={() => setPage(currentPage - 1)}
+              disabled={currentPage === 0}
+              title="Newer days"
+            >
+              <ChevronLeft />
+            </Button>
+            <span className="w-24 text-center text-2xs tabular-nums text-muted-foreground">
+              {daily.length === 0
+                ? "0"
+                : `${currentPage * pageSize + 1}–${Math.min((currentPage + 1) * pageSize, daily.length)}`}{" "}
+              of {daily.length}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={() => setPage(currentPage + 1)}
+              disabled={currentPage >= pageCount - 1}
+              title="Older days"
+            >
+              <ChevronRight />
+            </Button>
+          </div>
         </div>
         <div className="mt-3">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="h-8 px-0 text-2xs uppercase tracking-[0.08em] text-text-tertiary">Day</TableHead>
-                <TableHead className="h-8 px-0 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary">
+                <TableHead className="h-8 w-full whitespace-nowrap px-0 pr-6 text-2xs uppercase tracking-[0.08em] text-text-tertiary">
+                  Day
+                </TableHead>
+                <TableHead className="h-8 w-28 px-0 pr-6 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary">
                   Spend
                 </TableHead>
-                <TableHead className="hidden h-8 px-0 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary sm:table-cell">
+                <TableHead className="hidden h-8 w-24 px-0 pr-6 text-right text-2xs uppercase tracking-[0.08em] text-text-tertiary sm:table-cell">
                   Tokens
                 </TableHead>
-                <TableHead className="hidden h-8 px-0 text-2xs uppercase tracking-[0.08em] text-text-tertiary sm:table-cell">
+                <TableHead className="hidden h-8 whitespace-nowrap pl-2 text-2xs uppercase tracking-[0.08em] text-text-tertiary sm:table-cell">
                   Hosts
                 </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {daily.slice(0, 30).map(([day, entry]) => (
+              {pageRows.map(([day, entry]) => (
                 <TableRow key={day} className="border-border/60">
-                  <TableCell className="px-0 py-2 text-xs tabular-nums">
+                  <TableCell className="w-full whitespace-nowrap px-0 py-2 pr-6 text-xs tabular-nums">
                     {day}
                     <div className="mt-1 flex flex-wrap gap-1 sm:hidden">
                       {[...entry.hosts.entries()]
@@ -676,12 +719,14 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
                         ))}
                     </div>
                   </TableCell>
-                  <TableCell className="px-0 py-2 text-right text-xs tabular-nums">{money(entry.spent)}</TableCell>
-                  <TableCell className="hidden px-0 py-2 text-right text-xs tabular-nums text-muted-foreground sm:table-cell">
+                  <TableCell className="w-28 px-0 py-2 pr-6 text-right text-xs tabular-nums">
+                    {money(entry.spent)}
+                  </TableCell>
+                  <TableCell className="hidden w-24 px-0 py-2 pr-6 text-right text-xs tabular-nums text-muted-foreground sm:table-cell">
                     {compact(entry.tokens)}
                   </TableCell>
-                  <TableCell className="hidden px-0 py-2 sm:table-cell">
-                    <div className="flex flex-wrap gap-1">
+                  <TableCell className="hidden whitespace-nowrap py-2 pl-2 sm:table-cell">
+                    <div className="flex gap-1 sm:flex-nowrap">
                       {[...entry.hosts.entries()]
                         .sort((a, b) => b[1] - a[1])
                         .map(([name, value], index) => (
