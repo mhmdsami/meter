@@ -5,9 +5,6 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -345,18 +342,6 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
     [providerTotals],
   );
 
-  const hostData = useMemo(
-    () =>
-      [...hostTotals.entries()]
-        .sort((a, b) => b[1].spent - a[1].spent)
-        .map(([name, bucket], index) => ({
-          name,
-          value: bucket.spent,
-          color: HOST_COLORS[index % HOST_COLORS.length],
-        })),
-    [hostTotals],
-  );
-
   // 14-day trends stay independent of the selected range so the 1d view
   // still has context in the cards.
   const trend = useMemo(() => {
@@ -493,8 +478,8 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
         </div>
       </section>
 
-      <section className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <div className="animate-fade-up rounded-lg border border-border bg-card p-4 shadow-[var(--shadow-card)] lg:col-span-2">
+      <section className="mt-4">
+        <div className="animate-fade-up rounded-lg border border-border bg-card p-4 shadow-[var(--shadow-card)]">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-sm font-medium">{days === 1 ? "Today by provider" : "Daily spend"}</h2>
