@@ -6,6 +6,13 @@ import { env } from "@/lib/env";
 import { allowedEmails, isAllowed } from "@/lib/allowlist";
 import * as schema from "@/db/schema";
 
+export function googleConfigured(): boolean {
+  const e = env();
+  return !!e.GOOGLE_CLIENT_ID?.endsWith(".apps.googleusercontent.com")
+    && !!e.GOOGLE_CLIENT_SECRET
+    && !e.GOOGLE_CLIENT_SECRET.startsWith("local-");
+}
+
 export function auth() {
   const e = env();
   const database = drizzle(e.DB, { schema });
@@ -13,16 +20,15 @@ export function auth() {
     baseURL: e.BETTER_AUTH_URL,
     secret: e.BETTER_AUTH_SECRET,
     database: drizzleAdapter(database, { provider: "sqlite", schema }),
-    socialProviders:
-      e.GOOGLE_CLIENT_ID && e.GOOGLE_CLIENT_SECRET
-        ? {
-            google: {
-              clientId: e.GOOGLE_CLIENT_ID,
-              clientSecret: e.GOOGLE_CLIENT_SECRET,
-              scope: ["openid", "email", "profile"],
-            },
-          }
-        : undefined,
+    socialProviders: googleConfigured()
+      ? {
+          google: {
+            clientId: e.GOOGLE_CLIENT_ID!,
+            clientSecret: e.GOOGLE_CLIENT_SECRET!,
+            scope: ["openid", "email", "profile"],
+          },
+        }
+      : undefined,
     databaseHooks: {
       user: {
         create: {

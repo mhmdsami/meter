@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth-server";
+import { auth, googleConfigured } from "@/lib/auth-server";
 import { GoogleSignIn } from "./google-signin";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,15 @@ export default async function LoginPage({
         <h2 className="mt-7 text-base font-medium">Sign in</h2>
         <p className="mt-1 text-xs leading-5 text-muted">Access is limited to approved accounts.</p>
         <div className="mt-6">
-          <GoogleSignIn next={next} />
+          {googleConfigured() ? (
+            <GoogleSignIn next={next} />
+          ) : (
+            <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs leading-5 text-destructive">
+              Google OAuth is not configured. Set <code>GOOGLE_CLIENT_ID</code> and{" "}
+              <code>GOOGLE_CLIENT_SECRET</code> on the Worker with the real values from
+              Google Cloud Console.
+            </p>
+          )}
         </div>
       </div>
     </main>

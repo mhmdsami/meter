@@ -18,8 +18,8 @@ npx wrangler d1 create meter          # put database_id in wrangler.jsonc
 npm run db:migrate                    # 0001 usage rows + 0002 auth tables
 
 npx wrangler secret put METER_TOKEN        # bearer for collectors / menubar
-npx wrangler secret put GOOGLE_CLIENT_ID
-npx wrangler secret put GOOGLE_CLIENT_SECRET
+npx wrangler secret put GOOGLE_CLIENT_ID     # must end with .apps.googleusercontent.com
+npx wrangler secret put GOOGLE_CLIENT_SECRET # not a local-dev placeholder
 npx wrangler secret put BETTER_AUTH_SECRET # 32+ random bytes
 npx wrangler secret put BETTER_AUTH_URL    # https://meter.sam1.space
 npx wrangler secret put ALLOWED_EMAILS     # comma-separated Google emails
