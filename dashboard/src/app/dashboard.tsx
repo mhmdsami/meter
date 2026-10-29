@@ -164,14 +164,16 @@ function StatCard({
   return (
     <div
       className={cn(
-        "animate-fade-up flex flex-col justify-between gap-4 rounded-lg border border-border bg-card p-4 shadow-[var(--shadow-card)]",
+        "animate-fade-up flex min-w-0 flex-col justify-between gap-4 rounded-lg border border-border bg-card p-4 shadow-[var(--shadow-card)]",
         className,
       )}
       style={{ animationDelay: `${delay}ms` }}
     >
       <div>
         <div className="text-2xs uppercase tracking-[0.08em] text-muted-foreground">{label}</div>
-        <div className="mt-2 text-2xl font-medium tabular-nums tracking-[-0.02em]">{value}</div>
+        <div className="mt-2 whitespace-nowrap text-[clamp(1.15rem,1.65vw,1.5rem)] font-medium tabular-nums tracking-[-0.02em]">
+          {value}
+        </div>
         {sub ? <div className="mt-1 text-xs text-muted-foreground">{sub}</div> : null}
       </div>
       {children}
@@ -359,13 +361,6 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
     window.location.href = "/login";
   }
 
-  const initials = (user.name || user.email)
-    .split(/[\s@._-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
-
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:py-10">
       <header className="animate-fade-up flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
@@ -389,11 +384,8 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
               </Button>
             ))}
           </div>
-          <div className="hidden items-center gap-2 rounded-md border border-border py-1 pl-1 pr-2 sm:flex">
-            <span className="grid size-6 place-items-center rounded-sm bg-surface-2 text-2xs font-medium">
-              {initials}
-            </span>
-            <span className="max-w-40 truncate text-xs text-muted-foreground">{user.email}</span>
+          <div className="hidden items-center rounded-md border border-border px-2.5 py-1 sm:flex">
+            <span className="max-w-44 truncate text-xs text-muted-foreground">{user.email}</span>
           </div>
           <Button variant="ghost" size="icon" onClick={signOut} title="Sign out">
             <LogOut />
@@ -403,7 +395,7 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
 
       {error ? <p className="mt-4 text-xs text-destructive">{error}</p> : null}
 
-      <section className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
           label="Today"
           value={money(todayTotal)}
@@ -424,15 +416,13 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
           </div>
         </StatCard>
         <StatCard label="Last 7 days" value={money(last7)} sub="across all filtered hosts" delay={60} />
-        <div className="grid grid-cols-2 gap-3 sm:col-span-2 lg:col-span-1 lg:grid-cols-2">
-          <StatCard
-            label={`Last ${days}d`}
-            value={money(rangeTotal)}
-            sub={`${filtered.length.toLocaleString()} rows`}
-            delay={120}
-          />
-          <StatCard label="Tokens" value={compact(rangeTokens)} sub="input + output + cache" delay={180} />
-        </div>
+        <StatCard
+          label={`Last ${days}d`}
+          value={money(rangeTotal)}
+          sub={`${filtered.length.toLocaleString()} rows`}
+          delay={120}
+        />
+        <StatCard label="Tokens" value={compact(rangeTokens)} sub="input + output + cache" delay={180} />
       </section>
 
       <section className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

@@ -1,24 +1,23 @@
 # meter collector (Rust)
 
-Scans local agent logs on a remote host and pushes usage rows to the meter
-worker (`POST /api/ingest`). No inbound service, no database, no C toolchain:
-SQLite reads shell out to `python3`, HTTP uses `curl`, everything else is pure
-Rust.
+Scans local agent logs on a remote host and pushes usage rows to the Worker
+(`POST /api/ingest`). No inbound service, no database, no C toolchain: SQLite
+reads shell out to `python3`, HTTP uses `curl`, everything else is pure Rust.
 
 ## Config
 
 `~/.config/meter/collector.env` (chmod 600):
 
 ```sh
-METER_URL=https://meter.siamasdev.workers.dev
-METER_TOKEN=<from the worker secrets>
-METER_HOST=space
+METER_URL=https://<worker-domain>
+METER_TOKEN=<from the Worker secrets>
+METER_HOST=<hostname>
 METER_DAYS=30
 ```
 
-`METER_HOST` defaults to `/etc/hostname`; `METER_DAYS` defaults to 30 (the
-ingest replaces whole day/provider groups, so a 30-day pass reconciles history
-without double counting).
+`METER_HOST` defaults to `/etc/hostname`; `METER_DAYS` defaults to 30. Ingest
+replaces whole day/provider groups, so a 30-day pass reconciles history without
+double counting.
 
 ## Run
 

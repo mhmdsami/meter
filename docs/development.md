@@ -11,9 +11,9 @@ menubar/.build/debug/meter --json                      # same data as JSON
 ./install.sh                                           # release build plus the app bundle and agent
 ```
 
-`--print` is the quickest way to exercise every enabled provider against live
-credentials. Network and keychain state make integration flakier than unit
-tests, so treat the parser tests as the source of truth.
+`--print` exercises every enabled provider against live credentials. Network
+and keychain state make it flakier than the parser tests, which are the source
+of truth.
 
 ## Layout
 
@@ -64,5 +64,4 @@ system frameworks only, and comments only where a constraint is not obvious.
 ## Tests
 
 `Tests/MeterTests/` has parser and ledger tests. They do not launch the app.
-Add a fixture test for every new parser; that is what keeps provider quirks
-from regressing.
+Add a fixture test for every new parser.

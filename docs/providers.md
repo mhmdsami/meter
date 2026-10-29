@@ -41,7 +41,7 @@ The scans cover:
   recorded.
 - The `fx` AI Gateway usage log.
 
-Attribution rules worth knowing:
+Attribution:
 
 - pi and opencode record a provider per message. Messages go to the matching
   row; anything unmapped goes to `other`.
@@ -62,5 +62,5 @@ Attribution rules worth knowing:
   keys and are not implemented.
 - No widgets.
 
-Notifications, the local ledger, and the HTML dashboard are included; see
-[data.md](data.md) and [configuration.md](configuration.md).
+Notifications and the local ledger are covered in [data.md](data.md) and
+[configuration.md](configuration.md).

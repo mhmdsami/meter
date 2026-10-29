@@ -16,59 +16,34 @@ const display = Instrument_Serif({
   display: "swap",
 });
 
-const title = "meter — AI usage across machines";
-const description =
-  "Track AI spend, tokens, and quotas across your Mac, servers, and agents. Local scans, a Cloudflare dashboard, and a menu bar summary.";
+const title = "meter";
+const description = "AI usage across machines.";
+const ogImage = { url: "/opengraph-image.png", width: 1200, height: 630, alt: description };
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? "https://meter.sam1.space"),
   title: { default: title, template: "%s · meter" },
   description,
-  applicationName: "meter",
-  authors: [{ name: "Sami", url: "https://sam1.space" }],
-  creator: "Sami",
-  robots: { index: false, follow: false, googleBot: { index: false, follow: false } },
-  alternates: { canonical: "/" },
+  metadataBase: process.env.NEXT_PUBLIC_SITE_URL ? new URL(process.env.NEXT_PUBLIC_SITE_URL) : undefined,
+  robots: { index: false, follow: false },
+  manifest: "/manifest.webmanifest",
   openGraph: {
     type: "website",
-    url: "/",
     siteName: "meter",
     title,
     description,
-    images: [
-      {
-        url: "/opengraph-image.png",
-        width: 1200,
-        height: 630,
-        alt: "meter — AI usage across machines",
-      },
-    ],
+    images: [ogImage],
   },
   twitter: {
     card: "summary_large_image",
     title,
     description,
-    images: ["/opengraph-image.png"],
+    images: [ogImage],
   },
-  icons: {
-    icon: [
-      { url: "/icon.svg", type: "image/svg+xml" },
-      { url: "/icon.png", sizes: "64x64", type: "image/png" },
-    ],
-    shortcut: "/icon.svg",
-    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
-  },
-  manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, title: "meter", statusBarStyle: "black-translucent" },
-  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
   themeColor: "#0b0d12",
   colorScheme: "dark",
-  width: "device-width",
-  initialScale: 1,
-  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -1,7 +1,11 @@
 #!/usr/bin/env node
-// Post-deploy smoke check. Defaults to production; point it elsewhere with
-// SMOKE_URL=http://localhost:3000.
-const base = (process.env.SMOKE_URL ?? "https://meter.sam1.space").replace(/\/$/, "");
+// Post-deploy smoke check.
+//   SMOKE_URL=https://<deployment> npm run smoke
+const base = (process.env.SMOKE_URL ?? "").replace(/\/$/, "");
+if (!base) {
+  console.error("SMOKE_URL is required, e.g. SMOKE_URL=http://localhost:3000 npm run smoke");
+  process.exit(64);
+}
 
 const checks = [
   { path: "/api/health", status: 200 },

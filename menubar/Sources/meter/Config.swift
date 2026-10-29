@@ -55,7 +55,7 @@ struct NotificationSettings: Codable, Equatable {
 }
 
 struct CollectorConfig: Codable, Equatable {
-    var url: String = "https://meter.sam1.space"
+    var url: String = ""
     var host: String = ""
     var enabled: Bool = true
 }

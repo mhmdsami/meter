@@ -49,10 +49,9 @@ struct MenuContent: View {
                 }
                 .disabled(store.isRefreshing)
                 Spacer()
-                Button("Dashboard") {
-                    if let url = URL(string: "https://meter.sam1.space") {
-                        NSWorkspace.shared.open(url)
-                    }
+                if let collector = store.config.collector, !collector.url.isEmpty,
+                   let dashboard = URL(string: collector.url) {
+                    Button("Dashboard") { NSWorkspace.shared.open(dashboard) }
                 }
                 Button("Config") { NSWorkspace.shared.open(ConfigStore.url) }
                 Button("Quit") { NSApp.terminate(nil) }

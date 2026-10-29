@@ -48,6 +48,10 @@ jobs:
 
       - name: Deploy to Cloudflare Workers
         run: npm run deploy
+        env:
+          NEXT_PUBLIC_SITE_URL: ${{ vars.METER_URL }}
 
       - name: Smoke test
         run: npm run smoke
+        env:
+          SMOKE_URL: ${{ vars.METER_URL }}

@@ -3,7 +3,7 @@
 // recent window, so old local history never reaches D1 without this.
 //
 //   node scripts/backfill-ledger.mjs --db ~/.local/share/meter/usage.db \
-//     --url https://meter.sam1.space --host mac --days 90
+//     --url https://<worker-domain> --host <name> --days 90
 //
 // Token comes from --token or METER_TOKEN. Send one host per run: ingest
 // replaces every (host, day, provider) group it receives, so rerunning is
@@ -24,11 +24,11 @@ const { values } = parseArgs({
 });
 
 const db = values.db;
-const url = (values.url ?? "https://meter.sam1.space").replace(/\/$/, "");
+const url = (values.url ?? process.env.METER_URL ?? "").replace(/\/$/, "");
 const host = values.host;
 const days = Number(values.days);
-if (!db || !host) {
-  console.error("usage: backfill-ledger.mjs --db <path> --host <name> [--url] [--days]");
+if (!db || !host || !url) {
+  console.error("usage: backfill-ledger.mjs --db <path> --host <name> --url <worker> [--days]");
   process.exit(64);
 }
 

@@ -19,8 +19,8 @@ restart (or wait for the next refresh).
 ## Instances
 
 Each entry in `providers` is an instance. `type` selects the fetcher and `name`
-is the label shown in the menu. Names must be unique. Repeating a type is the
-point: three `opencode` entries with different keys are three rows.
+is the label shown in the menu. Names must be unique. Repeating a type is
+supported: three `opencode` entries with different keys are three rows.
 
 | field | meaning |
 | --- | --- |
@@ -67,8 +67,7 @@ Providers that reuse a CLI login (`codex`, `claude`, `antigravity`, `amp`,
 
 ## Provider options
 
-`options` is a string map whose keys depend on the provider. Cloudflare is the
-common case:
+`options` is a string map whose keys depend on the provider. Cloudflare:
 
 ```json
 {

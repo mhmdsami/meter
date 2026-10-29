@@ -6,16 +6,16 @@ AI usage tracking across machines, in three parts:
 |---|---|
 | [`menubar/`](menubar) | Swift macOS menu bar app: local scans, quota windows, balances, ledger |
 | [`collector/`](collector) | Rust agent for remote hosts: scans their logs and pushes rows |
-| [`dashboard/`](dashboard) | Next.js on Cloudflare Workers + D1: ingest API, summary API, Google-gated dashboard at <https://meter.sam1.space> |
+| [`dashboard/`](dashboard) | Next.js on Cloudflare Workers + D1: ingest API, summary API, Google-gated dashboard |
 
 ```
-mac (menubar) ──┐
-                ├─ POST /api/ingest → D1 → Next.js dashboard
-space (collector)┘         ↑
-                     menubar GET /api/summary
+laptop (menubar) ──┐
+                   ├─ POST /api/ingest → D1 → dashboard
+server (collector) ┘        ↑
+                      menubar GET /api/summary
 ```
 
-Each host scans its own logs locally. The collector and the Mac push
+Each host scans its own logs locally. The menubar and the collector push
 `(host, day, provider, project, model, spent, tokens, source)` rows to the
 Worker, which replaces each `(host, day, provider)` group atomically. The
 dashboard reads D1; the menubar reads the summary API.
@@ -45,8 +45,7 @@ meter --json         # the same data as JSON
 meter --test-notify  # ask for notification permission and send a test
 ```
 
-The **Dashboard** button in the menu opens the hosted dashboard at
-<https://meter.sam1.space>.
+The **Dashboard** button in the menu opens the hosted dashboard.
 
 SwiftUI and SwiftPM, no third-party dependencies, macOS 14 or later.
 
@@ -67,7 +66,7 @@ Config: `~/.config/meter/collector.env`. See
 
 ## Dashboard
 
-Next.js on Cloudflare Workers, D1 as the store, Next.js App Router.
+Next.js on Cloudflare Workers, D1 as the store.
 
 ```sh
 cd dashboard
@@ -80,7 +79,7 @@ npm run deploy
 Secrets: `METER_TOKEN` (ingest + client bearer), `GOOGLE_CLIENT_ID` /
 `GOOGLE_CLIENT_SECRET`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and
 `ALLOWED_EMAILS`. The Google client must allow
-`https://meter.sam1.space/api/auth/callback/google`. See
+`https://<worker-domain>/api/auth/callback/google`. See
 [dashboard/README.md](dashboard/README.md).
 
 The menubar only pushes its recent window, so older local history reaches D1
@@ -88,7 +87,7 @@ through a one-time backfill:
 
 ```sh
 node dashboard/scripts/backfill-ledger.mjs \
-  --db ~/.local/share/meter/usage.db --host mac --days 400
+  --db ~/.local/share/meter/usage.db --host <name> --days 400
 ```
 
 ## Gates and deploy
@@ -98,7 +97,7 @@ hooks: pre-commit lints staged JS/TS/JSON, pre-push runs the full gate.
 
 ```sh
 npm run gate     # biome + tsc + next build, swift build + test, cargo fmt/clippy/test
-npm run smoke    # checks health, login, 401s, and that /preview is prod-only
+SMOKE_URL=https://<deployment> npm run smoke   # health, login, 401s, /preview is prod-only
 ```
 
 `.github/workflows/ci.yml` runs the same legs on PRs. Pushes to `main` deploy

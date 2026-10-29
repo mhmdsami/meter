@@ -18,17 +18,16 @@ The script builds a release binary, packages it at
 login and restarts it if it exits.
 
 It also links `~/.local/bin/meter` to the bundle's executable, which is how
-the `--print`, `--json`, and `--test-notify` modes are meant to
-be run. Make sure `~/.local/bin` is on your `PATH`.
+the `--print`, `--json`, and `--test-notify` modes are meant to be run. Make
+sure `~/.local/bin` is on your `PATH`.
 
 ## Code signing
 
 The first install creates a self-signed certificate named `meter codesign` and
-signs the bundle with it. This is not decoration: meter reads credentials that
-belong to other apps (Claude Code, Zed), and macOS ties keychain grants to the
-app's signature. An ad-hoc signature changes on every build, which would
-invalidate those grants and re-prompt for access each time. With a stable
-signature, you approve each credential once.
+signs the bundle with it. meter reads credentials that belong to other apps
+(Claude Code, Zed), and macOS ties keychain grants to the app's signature. An
+ad-hoc signature changes on every build and invalidates those grants, so each
+read prompts again. With a stable signature you approve each credential once.
 
 ## First run
 
@@ -36,8 +35,8 @@ Open the menu bar item and let it refresh. The first read of Claude's or Zed's
 keychain item triggers a system prompt; choose **Always Allow**. Later reads,
 including background refreshes, are silent.
 
-If you deny it, background refreshes fail closed with a message telling you to
-click Refresh and allow access. You can also fix it later in Keychain Access.
+If you deny it, background refreshes fail with a message telling you to click
+Refresh and allow access. You can also fix it later in Keychain Access.
 
 Notifications need the app bundle, not a bare binary. `meter --test-notify`
 asks for permission and sends a test. If you dismissed the prompt, enable

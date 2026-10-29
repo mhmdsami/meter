@@ -49,7 +49,7 @@ fn load_config() -> Config {
             .unwrap_or_else(|_| "unknown".to_string())
     });
     Config {
-        url: get("METER_URL").unwrap_or_else(|| "https://meter.siamasdev.workers.dev".into()),
+        url: get("METER_URL").unwrap_or_default(),
         token: get("METER_TOKEN").unwrap_or_default(),
         host,
         days: get("METER_DAYS").and_then(|v| v.parse().ok()).unwrap_or(30),
@@ -61,6 +61,10 @@ fn main() {
     let dry_run = std::env::args().any(|a| a == "--dry-run");
     if config.token.is_empty() && !dry_run {
         eprintln!("meter-collector: METER_TOKEN is not set ({})", env_file().display());
+        std::process::exit(2);
+    }
+    if config.url.is_empty() && !dry_run {
+        eprintln!("meter-collector: METER_URL is not set ({})", env_file().display());
         std::process::exit(2);
     }
 

@@ -54,8 +54,8 @@ final class LedgerTests: XCTestCase {
         let ledger = tempLedger()
         let day = Calendar.current.startOfDay(for: Date())
         let spend = ["claude": [
-            CostScan.Spend(day: day, project: "/Users/me/dev/headout/payload", model: "claude-sonnet-4-5", spent: 4),
-            CostScan.Spend(day: day, project: "/Users/me/dev/headout/kirby", model: "claude-opus-5", spent: 9),
+            CostScan.Spend(day: day, project: "/Users/me/dev/projects/payload", model: "claude-sonnet-4-5", spent: 4),
+            CostScan.Spend(day: day, project: "/Users/me/dev/projects/kirby", model: "claude-opus-5", spent: 9),
         ]]
         ledger.recordBreakdown(spend, targetNames: [:], pricingGen: Date(), reported: [])
 
@@ -63,7 +63,7 @@ final class LedgerTests: XCTestCase {
         fmt.dateFormat = "yyyy-MM-dd"
         let key = fmt.string(from: day)
         let projects = ledger.attribution(by: "project", from: key, to: key)
-        XCTAssertEqual(projects.first?.label, "/Users/me/dev/headout/kirby")
+        XCTAssertEqual(projects.first?.label, "/Users/me/dev/projects/kirby")
         XCTAssertEqual(projects.first?.spent ?? 0, 9, accuracy: 0.0001)
         XCTAssertEqual(projects.count, 2)
 

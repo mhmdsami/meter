@@ -36,5 +36,5 @@ function rows() {
 
 export default function Preview() {
   if (process.env.NODE_ENV === "production") notFound();
-  return <Dashboard user={{ email: "srmf2025@gmail.com", name: "Sami", image: null }} demoRows={rows() as never} />;
+  return <Dashboard user={{ email: "demo@example.com", name: "Demo", image: null }} demoRows={rows() as never} />;
 }

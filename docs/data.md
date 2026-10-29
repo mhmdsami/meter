@@ -3,8 +3,8 @@
 ## The ledger
 
 Every refresh writes to a SQLite database at
-`~/.local/share/meter/usage.db`. It is user data, not a cache: keep it if you
-reinstall.
+`~/.local/share/meter/usage.db`. It is user data, not a cache; keep it across
+reinstalls.
 
 | table | contents |
 | --- | --- |
@@ -38,12 +38,12 @@ or already-pruned history visible without double-counting the current scans.
 
 ## Dashboard
 
-The dashboard is hosted at <https://meter.sam1.space>. It reads the Cloudflare
-D1 store that the menubar and collector push to, so it shows every host, and
-signs in with Google. The menu's Dashboard button opens it.
+The dashboard reads the Cloudflare D1 store that the menubar and collector
+push to, so it shows every host, and signs in with Google. The menu's Dashboard
+button opens it.
 
-The local ledger still powers the menubar's today total, history bars, and
-notifications; it no longer renders HTML.
+The local ledger powers the menubar's today total, history bars, and
+notifications.
 
 ## Files
 

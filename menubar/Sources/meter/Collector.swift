@@ -46,7 +46,7 @@ enum Collector {
     /// Rows are the type-keyed local scan; the worker replaces whole
     /// (host, day, provider) groups, so retries and corrections are safe.
     static func push(_ spend: [String: [CostScan.Spend]], config: CollectorConfig) async {
-        guard config.enabled, let base = URL(string: config.url), let token = token() else { return }
+        guard config.enabled, !config.url.isEmpty, let base = URL(string: config.url), let token = token() else { return }
         let fmt = dayFormatter
         // Two days, not the whole 30-day scan: a push is one Worker invocation,
         // and per-group D1 batches hit the platform's subrequest budget fast.
@@ -84,7 +84,7 @@ enum Collector {
 
     /// Today's per-provider spend from every host except this one.
     static func today(config: CollectorConfig) async -> [String: Double] {
-        guard config.enabled, let base = URL(string: config.url), let token = token() else { return [:] }
+        guard config.enabled, !config.url.isEmpty, let base = URL(string: config.url), let token = token() else { return [:] }
         var components = URLComponents(url: base.appendingPathComponent("api/summary"),
                                        resolvingAgainstBaseURL: false)
         components?.queryItems = [

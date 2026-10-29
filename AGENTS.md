@@ -24,8 +24,7 @@ cd dashboard && npm run db:migrate                     # apply D1 migrations
 
 `npm run gate` is what pre-push and CI run. The collector leg skips itself
 when cargo is not installed; CI has the toolchain, this Mac may not.
-`npm run smoke` defaults to `https://meter.sam1.space` and accepts
-`SMOKE_URL` for a local run.
+`npm run smoke` needs `SMOKE_URL` (the deployment or `http://localhost:3000`).
 
 `--print` is the fastest way to exercise every enabled provider against
 live credentials. Network and keychain state make integration flakier

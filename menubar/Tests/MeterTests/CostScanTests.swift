@@ -229,12 +229,12 @@ final class CostScanTests: XCTestCase {
 extension CostScanTests {
     func testClaudeRowsCarryProjectAndModel() {
         let text = """
-        {"type":"user","cwd":"/Users/me/dev/headout/payload","timestamp":"2026-01-02T09:00:00Z"}
-        {"type":"assistant","cwd":"/Users/me/dev/headout/payload","timestamp":"2026-01-02T09:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-sonnet-4-5","usage":{"input_tokens":1000000,"output_tokens":0}}}
+        {"type":"user","cwd":"/Users/me/dev/projects/payload","timestamp":"2026-01-02T09:00:00Z"}
+        {"type":"assistant","cwd":"/Users/me/dev/projects/payload","timestamp":"2026-01-02T09:00:00Z","requestId":"r1","message":{"id":"m1","model":"claude-sonnet-4-5","usage":{"input_tokens":1000000,"output_tokens":0}}}
         """
         let rows = CostScan.fileSpend(text: text, format: .claude, pricing: pricing)
         XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows[0].project, "/Users/me/dev/headout/payload")
+        XCTAssertEqual(rows[0].project, "/Users/me/dev/projects/payload")
         XCTAssertEqual(rows[0].model, "claude-sonnet-4-5")
         XCTAssertEqual(rows[0].spent, 3.0, accuracy: 0.0001)
     }
@@ -250,13 +250,13 @@ extension CostScanTests {
 
     func testCodexRowsCarrySessionProjectAndDayModel() {
         let text = """
-        {"type":"session_meta","payload":{"cwd":"/Users/me/dev/headout/acq-helper"}}
-        {"type":"turn_context","payload":{"model":"gpt-5.2","cwd":"/Users/me/dev/headout/acq-helper"}}
+        {"type":"session_meta","payload":{"cwd":"/Users/me/dev/projects/acq-helper"}}
+        {"type":"turn_context","payload":{"model":"gpt-5.2","cwd":"/Users/me/dev/projects/acq-helper"}}
         \(codexLine("2026-01-02T12:00:00Z", input: 1_000_000, cached: 0, output: 0))
         """
         let rows = CostScan.fileSpend(text: text, format: .codex, pricing: pricing)
         XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows[0].project, "/Users/me/dev/headout/acq-helper")
+        XCTAssertEqual(rows[0].project, "/Users/me/dev/projects/acq-helper")
         XCTAssertEqual(rows[0].model, "gpt-5.2")
         XCTAssertEqual(rows[0].spent, 1.0, accuracy: 0.0001)
     }
