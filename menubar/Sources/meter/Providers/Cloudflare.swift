@@ -32,7 +32,7 @@ enum Cloudflare {
 
         let forbidden = ProviderError.badResponse(
             "Cloudflare token can't read AI Gateway — create an API token with Account → AI Gateway → Read (an AI Gateway request token like cfut_… has no read access)")
-        let since = CostScan.startOfToday
+        let since = Calendar.current.startOfDay(for: Date())
         var entries: [LogEntry] = []
         // Bounded pagination: newest first, stop once a page predates today
         for page in 1...10 {

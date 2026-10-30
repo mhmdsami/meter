@@ -4,21 +4,22 @@ AI usage tracking across machines, in three parts:
 
 | component | what it is |
 |---|---|
-| [`menubar/`](menubar) | Swift macOS menu bar app: local scans, quota windows, balances, ledger |
-| [`collector/`](collector) | Rust agent for remote hosts: scans their logs and pushes rows |
+| [`menubar/`](menubar) | Swift macOS menu bar app: quota windows, balances, and cross-host spend |
+| [`collector/`](collector) | Rust agent for every host (macOS, Linux, Windows best effort): scans logs and pushes rows |
 | [`dashboard/`](dashboard) | Next.js on Cloudflare Workers + D1: ingest API, summary API, Google-gated dashboard |
 
 ```
-laptop (menubar) ──┐
-                   ├─ POST /api/ingest → D1 → dashboard
-server (collector) ┘        ↑
-                      menubar GET /api/summary
+laptop (collector) ──┐
+                     ├─ POST /api/ingest → D1 → dashboard
+server (collector) ──┘        ↑
+                    menubar GET /api/summary
 ```
 
-Each host scans its own logs locally. The menubar and the collector push
-`(host, day, provider, project, model, spent, tokens, source)` rows to the
-Worker, which replaces each `(host, day, provider)` group atomically. The
-dashboard reads D1; the menubar reads the summary API.
+The collector is the only thing that scans logs, and it runs on every host.
+It pushes `(host, day, provider, project, model, spent, tokens, source)` rows
+to the Worker, which replaces each `(host, day, provider)` group atomically.
+The dashboard reads D1; the menubar reads the summary API and caches the last
+response for offline use.
 
 ## Menubar
 
@@ -26,10 +27,10 @@ A macOS menu bar app for AI usage and spend. It tracks multiple named
 instances of the same provider, so three OpenCode accounts are three rows,
 not one.
 
-The dropdown lists one row per instance: quota windows with reset countdowns,
-credit balances, today's spend, and errors. There is no settings window;
-configuration is `~/.config/meter/config.json`. A local SQLite ledger records
-daily totals and powers the menubar's history.
+The app does not scan logs. It fetches quota windows and credit balances from
+each provider, reads spend from the Worker's summary API, and keeps the last
+response on disk so an offline launch still shows numbers. There is no
+settings window; configuration is `~/.config/meter/config.json`.
 
 ```sh
 ./install.sh
@@ -52,8 +53,9 @@ SwiftUI and SwiftPM, no third-party dependencies, macOS 14 or later.
 ## Collector
 
 Rust, no C toolchain required: SQLite reads use `python3`, HTTP uses `curl`.
-Scans opencode, pi/OMP, and Claude Code on a remote host, then pushes to the
-dashboard API.
+Scans Codex rollouts, Claude Code (including the Desktop stores), opencode,
+pi/OMP, the Antigravity CLI, and the fx gateway log, then pushes to the API.
+Runs on macOS, Linux, and Windows where those tools and `python3` exist.
 
 ```sh
 cd collector
@@ -82,13 +84,8 @@ Secrets: `METER_TOKEN` (ingest + client bearer), `GOOGLE_CLIENT_ID` /
 `https://<worker-domain>/api/auth/callback/google`. See
 [dashboard/README.md](dashboard/README.md).
 
-The menubar only pushes its recent window, so older local history reaches D1
-through a one-time backfill:
-
-```sh
-node dashboard/scripts/backfill-ledger.mjs \
-  --db ~/.local/share/meter/usage.db --host <name> --days 400
-```
+The old local ledger can be imported once with
+`dashboard/scripts/backfill-ledger.mjs`; the collector does not read it.
 
 ## Gates and deploy
 

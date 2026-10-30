@@ -1,3 +1,7 @@
+mod antigravity;
+mod codex;
+mod fx;
+mod platform;
 mod pricing;
 mod scan;
 
@@ -17,7 +21,7 @@ struct Config {
 }
 
 fn home() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+    platform::home()
 }
 
 fn env_file() -> PathBuf {
@@ -43,14 +47,13 @@ fn load_config() -> Config {
             .filter(|value| !value.is_empty())
             .or_else(|| map.get(key).cloned().filter(|value| !value.is_empty()))
     };
-    let host = get("METER_HOST").unwrap_or_else(|| {
-        fs::read_to_string("/etc/hostname")
-            .map(|s| s.trim().to_string())
-            .unwrap_or_else(|_| "unknown".to_string())
-    });
+    let host = get("METER_HOST").unwrap_or_else(platform::host_name);
     Config {
         url: get("METER_URL").unwrap_or_default(),
-        token: get("METER_TOKEN").unwrap_or_default(),
+        // macOS keeps the token in the login keychain, same slot the menubar uses.
+        token: get("METER_TOKEN")
+            .or_else(|| platform::keychain_token("meter/collector"))
+            .unwrap_or_default(),
         host,
         days: get("METER_DAYS").and_then(|v| v.parse().ok()).unwrap_or(30),
     }
@@ -75,18 +78,28 @@ fn main() {
     }
 
     let pricing = Pricing::load(&home().join(".cache/meter/models.json"));
-    let now_ms = (OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64;
+    let now = OffsetDateTime::now_utc();
+    let now_ms = (now.unix_timestamp_nanos() / 1_000_000) as i64;
     let since_ms = now_ms - config.days * 86_400_000;
+    let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
+    let since_day = (now.to_offset(offset).date() - time::Duration::days(config.days)).to_string();
 
     let oc_path = home().join(".local/share/opencode/opencode.db");
     let pi_roots = vec![
         home().join(".pi/agent/sessions"),
         home().join(".omp/agent/sessions"),
     ];
-    let claude_roots = vec![
+    let mut claude_roots = vec![
         home().join(".claude/projects"),
         home().join(".config/claude/projects"),
     ];
+    claude_roots.extend(scan::desktop_claude_roots(&home()));
+    let codex_roots = vec![
+        home().join(".codex/sessions"),
+        home().join(".codex/archived_sessions"),
+    ];
+    let fx_path = home().join(".fx/usage.jsonl");
+    let antigravity_root = home().join(".gemini/antigravity-cli");
 
     let mut rows: Vec<Row> = Vec::new();
     rows.extend(scan::opencode(&config.host, &oc_path, since_ms, &pricing));
@@ -95,6 +108,20 @@ fn main() {
         &config.host,
         &claude_roots,
         since_ms,
+        &pricing,
+    ));
+    rows.extend(codex::scan(
+        &config.host,
+        &codex_roots,
+        since_ms,
+        &since_day,
+        &pricing,
+    ));
+    rows.extend(fx::rows(&config.host, &fx_path, &since_day, &pricing));
+    rows.extend(antigravity::scan(
+        &config.host,
+        &antigravity_root,
+        &since_day,
         &pricing,
     ));
     rows.sort_by(|a, b| {

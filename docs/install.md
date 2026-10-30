@@ -14,7 +14,7 @@
 
 The script builds a release binary, packages it at
 `~/Applications/meter.app`, and writes the LaunchAgent
-`~/Library/LaunchAgents/app.meter.meter.plist`. The agent starts meter at
+`~/Library/LaunchAgents/app.meter.menubar.plist`. The agent starts meter at
 login and restarts it if it exits.
 
 It also links `~/.local/bin/meter` to the bundle's executable, which is how
@@ -48,15 +48,15 @@ The app reloads `~/.config/meter/config.json` on every refresh, so most changes
 apply within one interval. To apply them immediately:
 
 ```sh
-launchctl kickstart -k gui/$(id -u)/app.meter.meter
+launchctl kickstart -k gui/$(id -u)/app.meter.menubar
 ```
 
 ## Uninstall
 
 ```sh
-launchctl bootout gui/$(id -u)/app.meter.meter
+launchctl bootout gui/$(id -u)/app.meter.menubar
 rm -rf ~/Applications/meter.app
-rm -f ~/Library/LaunchAgents/app.meter.meter.plist ~/.local/bin/meter
+rm -f ~/Library/LaunchAgents/app.meter.menubar.plist ~/.local/bin/meter
 ```
 
 That leaves your data in place. To remove it as well:

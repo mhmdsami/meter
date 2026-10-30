@@ -19,8 +19,8 @@ like; every instance gets its own row.
 
 `other` is special: it has no fetcher. It collects spend from pi and opencode
 messages whose provider is not mapped to a row, and it hides itself while the
-total is zero. The menu shows one aggregated "Others" row; the ledger and
-dashboard keep the real provider and model.
+total is zero. The menu shows one aggregated "Others" row; the collector and
+the dashboard keep the real provider and model.
 
 ## Where spend comes from
 

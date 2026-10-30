@@ -34,7 +34,7 @@ fn bare_model(model: &str) -> String {
     }
 }
 
-fn pi_provider(provider: &str) -> &'static str {
+fn pi_provider(provider: &str) -> &str {
     match provider {
         "straitly" => "straitly",
         "openai-codex" | "openai" => "codex",
@@ -42,14 +42,14 @@ fn pi_provider(provider: &str) -> &'static str {
         "openrouter" => "openrouter",
         "anthropic" => "claude",
         "google" | "google-vertex" | "gemini" => "antigravity",
-        _ => "other",
+        other => other,
     }
 }
 
-fn opencode_provider(provider: &str) -> &'static str {
+fn opencode_provider(provider: &str) -> &str {
     match provider {
         "opencode-go" | "opencode" => "opencode",
-        _ => "other",
+        other => other,
     }
 }
 
@@ -318,6 +318,39 @@ struct ClaudeMsg {
     cache_read: f64,
     cache_write: f64,
     sum: f64,
+}
+
+/// Claude Desktop embeds `.claude/projects` stores under Application Support;
+/// the app read them too, so the collector has to as well.
+pub fn desktop_claude_roots(home: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let support = home.join("Library/Application Support/Claude");
+    for store in ["local-agent-mode-sessions", "claude-code-sessions"] {
+        collect_claude_dirs(&support.join(store), &mut roots);
+    }
+    roots
+}
+
+fn collect_claude_dirs(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if path.file_name().and_then(|name| name.to_str()) == Some("projects")
+            && path
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .and_then(|name| name.to_str())
+                == Some(".claude")
+        {
+            out.push(path.clone());
+        }
+        collect_claude_dirs(&path, out);
+    }
 }
 
 pub fn claude(host: &str, roots: &[PathBuf], since_ms: i64, pricing: &Pricing) -> Vec<Row> {

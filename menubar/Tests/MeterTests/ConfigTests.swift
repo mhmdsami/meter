@@ -55,37 +55,6 @@ final class ConfigTests: XCTestCase {
         XCTAssertNotNil(isoDate("2026-09-03T12:27:08Z"))
     }
 
-    func testPiSpendTargetsEachProviderRow() {
-        // pi now routes by its own provider field, so every mapped row is a target
-        let enabled = [
-            ProviderInstance(type: "claude", name: "Claude"),
-            ProviderInstance(type: "codex", name: "Codex"),
-            ProviderInstance(type: "opencode", name: "OpenCode"),
-            ProviderInstance(type: "antigravity", name: "Antigravity"),
-            ProviderInstance(type: "straitly", name: "Straitly"),
-        ]
-        let names = Providers.costTargetNames(enabled: enabled)
-        for type in ["claude", "codex", "opencode", "antigravity", "straitly"] {
-            XCTAssertEqual(names[type], enabled.first { $0.type == type }?.name)
-        }
-    }
-
-    func testCatchAllRowAppearsOnlyWhenItHasSpend() {
-        let enabled = [ProviderInstance(type: "other", name: "Other")]
-        let readings = [InstanceReading(id: "Other", type: "other", name: "Other")]
-        XCTAssertEqual(Providers.costTargetNames(enabled: enabled)["other"], "Other")
-        // no unmapped usage → hidden; spend → shown
-        XCTAssertTrue(Providers.attachLocalCosts(readings, enabled: enabled,
-                                                 today: ["other": 0]).isEmpty)
-        XCTAssertEqual(Providers.attachLocalCosts(readings, enabled: enabled,
-                                                  today: ["other": 1.5]).first?.spendToday, 1.5)
-    }
-
-    func testUnmappedPiProviderFallsToCatchAll() {
-        // no dedicated row: pi's inception usage lands on the "other" catch-all
-        XCTAssertNil(CostScan.piProviderType("inception"))
-    }
-
     func testOpencodeV2CredentialFromDB() throws {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent("meter-cred-\(UUID().uuidString).db").path

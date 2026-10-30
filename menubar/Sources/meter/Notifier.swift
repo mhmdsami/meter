@@ -51,11 +51,28 @@ enum Notifier {
         return fmt.string(from: date)
     }
 
+    /// Sent-alert keys, so a crossing does not repeat every refresh.
+    enum NotificationLog {
+        private static let key = "notified.keys"
+        private static let limit = 400
+
+        static func keys() -> Set<String> {
+            Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        }
+
+        static func add(_ ids: [String]) {
+            var all = UserDefaults.standard.stringArray(forKey: key) ?? []
+            all.append(contentsOf: ids)
+            if all.count > limit { all = Array(all.suffix(limit)) }
+            UserDefaults.standard.set(all, forKey: key)
+        }
+    }
+
     // MARK: - posting
 
     static func check(readings: [InstanceReading], todayTotal: Double, settings: NotificationSettings) {
         guard settings.enabled else { return }
-        let notified = Ledger.shared.notifiedKeys()
+        let notified = NotificationLog.keys()
         let alerts = pending(readings: readings, todayTotal: todayTotal,
                              settings: settings, notified: notified)
         guard !alerts.isEmpty else { return }
@@ -92,7 +109,7 @@ enum Notifier {
             content.title = alert.title
             content.body = alert.body
             center.add(UNNotificationRequest(identifier: alert.id, content: content, trigger: nil))
-            Ledger.shared.markNotified(alert.id)
+            NotificationLog.add([alert.id])
         }
     }
 }

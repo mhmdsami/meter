@@ -1,58 +1,54 @@
 # Usage data
 
-## The ledger
+## Where usage lives
 
-Every refresh writes to a SQLite database at
-`~/.local/share/meter/usage.db`. It is user data, not a cache; keep it across
-reinstalls.
+The collector writes rows to the Worker, which stores them in D1 keyed by
+`(host, day, provider, project, model)`. D1 is the only store the dashboard
+and the menubar read.
 
-| table | contents |
+`~/.local/share/meter/usage.db` is the old local ledger. Older builds wrote it
+and the app no longer updates it; it stays as user data so nothing recorded
+before the move is lost.
+
+| legacy table | contents |
 | --- | --- |
 | `daily` | one row per day and provider: spend, source, final flag |
 | `breakdown` | spend and tokens per day, provider, project, and model |
 | `quota_snapshots` | every quota reading the app has seen, with reset times |
 | `meta` | bookkeeping such as the backfill marker and notification keys |
 
-Writes are upserts keyed by day, provider, and (for `breakdown`) project and
-model, so a refresh cannot double-count. Past days are marked `final`; today is
-provisional. The first run backfills 90 days from the local scans. Normal
-refreshes rewrite today and yesterday every 10 minutes; the full 30-day window
-is reconciled every 6 hours, on launch, and on a manual refresh. Scans are
-whole-file, so cadence — not window size — is what keeps them cheap. That also
-keeps older rows stable when a log has been pruned or edited by hand. Codex
-session discovery still reaches back 30 days, because a resumed thread appends
-today's usage to the rollout file created on its first day.
+Ingest replaces each `(host, day, provider)` group, so a re-scan cannot
+double-count. The collector pushes a 30-day window every 10 minutes; a resumed
+thread that writes into an older day is picked up by the next pass. Rows whose
+day is outside the window are left untouched, so history already in D1 stays
+put when local logs are pruned.
 
 The `source` column is `reported` when the provider's own billing supplied the
-number (vercel) and `estimated` when it was priced from token counts at list
-rates. opencode used to report a per-message cost; 2.2 stopped doing that, so
-its spend is priced from tokens at that provider's rate (reasoning tokens count
-as output) and marked `estimated`.
+number (vercel, and opencode when it records a per-message cost) and
+`estimated` when the collector priced it from token counts at list rates.
+opencode 2.2 stopped recording costs, so most of its spend is estimated from
+tokens at that provider's rate, with reasoning tokens counted as output.
 
 ## Today and history in the menu
 
-The menu's today total comes from the live scans, merged with the ledger for
-the same day. The 7- and 30-day history is built the same way: per day, take
-the larger of the ledger total and the sum of the scans. This keeps imported
-or already-pruned history visible without double-counting the current scans.
+The menu's today total and its 7- and 30-day bars come from the summary API,
+so they cover every host. The response is cached; without a network the menu
+shows the last good numbers.
 
 ## Dashboard
 
-The dashboard reads the Cloudflare D1 store that the menubar and collector
-push to, so it shows every host, and signs in with Google. The menu's Dashboard
-button opens it.
-
-The local ledger powers the menubar's today total, history bars, and
-notifications.
+The dashboard reads the same D1 store and signs in with Google. The menu's
+Dashboard button opens it.
 
 ## Files
 
 | path | purpose |
 | --- | --- |
 | `~/.config/meter/config.json` | providers and settings |
-| `~/.local/share/meter/usage.db` | the ledger |
-| `~/.cache/meter/models.json` | models.dev price table |
+| `~/.local/share/meter/usage.db` | legacy ledger, no longer written |
+| `~/.cache/meter/summary.json` | last summary response, for offline |
+| `~/.cache/meter/models.json` | models.dev price table (collector) |
 | `~/.cache/meter/readings.json` | last readings, so the bar doesn't blank on launch |
 
-Deleting `usage.db` loses history; the app will backfill what it can from the
-logs that still exist. Deleting the cache only forces a fresh price fetch.
+Deleting `usage.db` loses only the old local history. Deleting the cache
+forces a fresh summary and price fetch.

@@ -31,16 +31,6 @@ enum Providers {
         "other": CatchAll.fetch,
     ]
 
-    /// Instance name each device-wide cost source currently attaches to, used as
-    /// the ledger's account label (device-wide scans are per provider, not per key).
-    static func costTargetNames(enabled: [ProviderInstance]) -> [String: String] {
-        var out: [String: String] = [:]
-        for source in LocalCostSource.all {
-            if let name = source.target(enabled)?.name { out[source.type] = name }
-        }
-        return out
-    }
-
     static func fetch(_ instance: ProviderInstance) async -> InstanceReading {
         guard let fetch = all[instance.type] else {
             return InstanceReading(id: instance.name, type: instance.type, name: instance.name,
@@ -72,99 +62,17 @@ enum Providers {
         return readings
     }
 
-    /// Local log scans are device-wide, so each source's total attaches to exactly
-    /// one instance of its type, resolved by `LocalCostSource.target`.
-    struct LocalCostSource {
-        let type: String
-        let spend: @Sendable (Pricing, Date) -> [CostScan.Spend]
-        /// Which enabled instance owns the device-wide total. Codex, Claude and
-        /// Vercel hold a single device-wide credential, so first enabled is the
-        /// only correct answer; opencode matches the actively billed key.
-        let target: @Sendable ([ProviderInstance]) -> ProviderInstance?
-        /// Hide the row while its total is ~zero (used by the catch-all).
-        var hideWhenZero: Bool = false
-
-        static func firstEnabled(
-            _ type: String,
-            _ spend: @escaping @Sendable (Pricing, Date) -> [CostScan.Spend]
-        ) -> LocalCostSource {
-            .init(type: type, spend: spend,
-                  target: { enabled in enabled.first { $0.type == type } })
-        }
-
-        /// pi tags each message with the provider that actually served it, so its
-        /// spend joins that provider's row rather than a single router row.
-        private static func piSpend(for type: String, pricing: Pricing, windowStart: Date) -> [CostScan.Spend] {
-            CostScan.spend(urls: CostScan.piURLs(), format: .pi,
-                           windowStart: windowStart, pricing: pricing)
-                .filter { CostScan.piProviderType($0.provider) == type }
-        }
-
-        static let all: [LocalCostSource] = [
-            .firstEnabled("codex") { pricing, windowStart in
-                CostScan.codexSourceSpend(windowStart: windowStart, pricing: pricing)
-                    + piSpend(for: "codex", pricing: pricing, windowStart: windowStart)
-            },
-            .firstEnabled("claude") { pricing, windowStart in
-                CostScan.spend(urls: CostScan.claudeURLs(), format: .claude,
-                               windowStart: windowStart, pricing: pricing)
-                    + piSpend(for: "claude", pricing: pricing, windowStart: windowStart)
-            },
-            .firstEnabled("antigravity") { pricing, windowStart in
-                CostScan.antigravitySpend(windowStart: windowStart, pricing: pricing)
-                    + piSpend(for: "antigravity", pricing: pricing, windowStart: windowStart)
-            },
-            .firstEnabled("straitly") { pricing, windowStart in
-                piSpend(for: "straitly", pricing: pricing, windowStart: windowStart)
-            },
-            .firstEnabled("vercel") { pricing, windowStart in
-                CostScan.spend(urls: [CostScan.fxURL()], format: .vercel,
-                               windowStart: windowStart, pricing: pricing)
-            },
-            .init(type: "opencode",
-                  spend: { pricing, windowStart in
-                      CostScan.opencodeSpend(windowStart: windowStart, pricing: pricing)
-                          .filter { CostScan.opencodeProviderType($0.provider) == "opencode" }
-                          + piSpend(for: "opencode", pricing: pricing, windowStart: windowStart)
-                  },
-                  target: { enabled in
-                      let activeKey = OpenCode.activeAccountKey()
-                      return enabled.first { inst in
-                          guard inst.type == "opencode",
-                                let key = try? Secrets.apiKey(for: inst) else { return false }
-                          return key == activeKey
-                      } ?? enabled.first { $0.type == "opencode" }
-                  }),
-            .init(type: "other",
-                  spend: { pricing, windowStart in
-                      // every pi/opencode provider no dedicated row claims; the
-                      // menubar aggregates these, the ledger splits them by provider
-                      let pi = CostScan.spend(urls: CostScan.piURLs(), format: .pi,
-                                              windowStart: windowStart, pricing: pricing)
-                          .filter { CostScan.piProviderType($0.provider) == nil }
-                      let oc = CostScan.opencodeSpend(windowStart: windowStart, pricing: pricing)
-                          .filter { CostScan.opencodeProviderType($0.provider) == nil }
-                      return pi + oc
-                  },
-                  target: { enabled in enabled.first { $0.type == "other" } },
-                  hideWhenZero: true),
-        ]
-    }
-
-    /// Attaches today's device-wide totals (precomputed by `CostScan.dailyTotals`)
-    /// to the merged reading list — callers must pass every enabled instance and
-    /// every reading (fresh or stale), or stale spendToday values survive the
-    /// rotation of an actively billed key.
-    static func attachLocalCosts(_ readings: [InstanceReading], enabled: [ProviderInstance],
-                                 today: [String: Double]) -> [InstanceReading] {
+    /// The summary reports spend per provider type, so the total attaches to the
+    /// first enabled instance of that type. Extra instances of the same provider
+    /// cannot be told apart server-side and show quota only.
+    static func attachSpend(_ readings: [InstanceReading], enabled: [ProviderInstance],
+                            today: [String: Double]) -> [InstanceReading] {
         var out = readings
-        for source in LocalCostSource.all {
-            guard let name = source.target(enabled)?.name,
-                  let value = today[source.type] else { continue }
-            if source.hideWhenZero && value <= 0.004 { continue }
-            if let idx = out.firstIndex(where: { $0.name == name }) {
-                out[idx].spendToday = value
-            }
+        for i in out.indices { out[i].spendToday = nil }
+        for (type, value) in today where value > 0.004 {
+            guard let name = enabled.first(where: { $0.type == type })?.name,
+                  let index = out.firstIndex(where: { $0.name == name }) else { continue }
+            out[index].spendToday = value
         }
         return hideEmpty(out)
     }

@@ -15,17 +15,17 @@ enum PrintMode {
         }
         Task.detached {
             let config = ConfigStore.load()
-            let types = Set(config.providers.filter(\.enabled).map(\.type))
-            let spend = await CostScan.spendTotals(days: 30, types: types, pricing: await Pricing.load())
+            let enabled = config.providers.filter(\.enabled)
+            var summary: Summary?
+            if let collector = config.collector {
+                summary = await SummaryClient.fetch(config: collector)
+            }
             var readings = await Providers.fetchAll(config.providers)
-            readings = Providers.attachLocalCosts(
-                readings, enabled: config.providers.filter(\.enabled),
-                today: Store.mergeToday(
-                    scans: CostScan.dailyTotals(spend, days: 1).mapValues { $0.first ?? 0 },
-                    ledger: Ledger.shared.todayByProvider()))
-            let history = Store.historyLines(Store.historyDaily(
-                scans: CostScan.dailyTotals(spend, days: 30),
-                ledger: Ledger.shared.recentDailyTotals(days: 30)))
+            readings = Providers.attachSpend(readings, enabled: enabled,
+                                             today: summary?.todayByProvider ?? [:])
+            let history = summary.map {
+                Store.historyLines(SummaryClient.dailyByProvider($0, days: 30))
+            } ?? []
             print(json ? encode(config: config, readings: readings, history: history)
                        : render(config: config, readings: readings))
             Antigravity.shutdown()

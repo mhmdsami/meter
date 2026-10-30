@@ -2,85 +2,73 @@ import XCTest
 @testable import meter
 
 final class StoreTests: XCTestCase {
-    func testHistoryDailyMergesScanAndLedgerWithoutDoubleCounting() {
-        // index 0 = today; scans are device-wide per provider, ledger is the day total
-        let scans = ["claude": [1.0, 2.0, 3.0], "opencode": [0.5, 0.0, 0.0]]
-        let ledger = [1.0, 5.0, 0.0]
-        let merged = Store.historyDaily(scans: scans, ledger: ledger)
-        // per day: max(scan sum, ledger) — the ledger already contains the scans
-        XCTAssertEqual(merged["total"], [1.5, 5.0, 3.0])
+    private func series(_ values: [Double], length: Int = 30) -> [Double] {
+        Array(repeating: 0, count: max(0, length - values.count)) + values
     }
 
-    func testLedgerSpendSplitsCatchAllByRealProvider() {
-        let day = CostScan.startOfToday
-        let spend = [
-            "codex": [CostScan.Spend(day: day, project: "/p", model: "gpt", spent: 1,
-                                    provider: "openai-codex")],
-            "other": [
-                CostScan.Spend(day: day, project: "/p", model: "mercury-3", spent: 2,
-                               provider: "inception"),
-                CostScan.Spend(day: day, project: "/p", model: "foo", spent: 3,
-                               provider: "acme"),
-            ],
+    func testHistoryLinesSumsTheLastSevenAndThirtyDays() {
+        let daily = [
+            "anthropic": series(Array(repeating: 1, count: 30)),
+            "openai": series(Array(repeating: 0.5, count: 30)),
         ]
-        let ledger = Store.ledgerSpend(spend)
-        XCTAssertNil(ledger["other"])                       // no catch-all bucket in the ledger
-        XCTAssertEqual(ledger["inception"]?.first?.model, "mercury-3")
-        XCTAssertEqual(ledger["acme"]?.first?.spent, 3)
-        XCTAssertEqual(ledger["codex"]?.first?.model, "gpt") // mapped rows untouched
+        let lines = Store.historyLines(daily)
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertEqual(lines[0].id, "7d")
+        XCTAssertEqual(lines[0].total, "$10.50")
+        XCTAssertEqual(lines[1].total, "$45.00")
+        XCTAssertEqual(lines[1].spark.count, 30)
+        XCTAssertEqual(lines[1].spark.max() ?? 0, 1, accuracy: 0.0001)
     }
 
-    func testMergeTodayPrefersLedgerAndKeepsNewerScan() {
-        let scans = ["opencode": 0.21]
-        let ledger = ["claude": 31.09, "opencode": 0.19]
-        let merged = Store.mergeToday(scans: scans, ledger: ledger)
-        XCTAssertEqual(merged["claude"] ?? 0, 31.09, accuracy: 0.0001) // imported, scan absent
-        XCTAssertEqual(merged["opencode"] ?? 0, 0.21, accuracy: 0.0001) // scan newer than ledger
+    func testHistoryLinesSkipEmptyWindows() {
+        XCTAssertTrue(Store.historyLines(["anthropic": series([])]).isEmpty)
     }
-}
 
-extension StoreTests {
-    func testCarrySpendKeepsOldValuesOnFreshReadings() {
-        let old = [
-            InstanceReading(id: "a", type: "claude", name: "Claude", spendToday: 9.5),
-            InstanceReading(id: "b", type: "codex", name: "Codex", spendToday: 2.0),
+    func testAttachSpendUsesTheFirstInstanceOfEachType() {
+        let enabled = [
+            ProviderInstance(type: "claude", name: "Claude work"),
+            ProviderInstance(type: "claude", name: "Claude personal"),
+            ProviderInstance(type: "codex", name: "Codex"),
         ]
-        let fresh = [
-            InstanceReading(id: "a", type: "claude", name: "Claude"),
-            InstanceReading(id: "c", type: "amp", name: "Amp"),
+        let readings = [
+            InstanceReading(id: "Claude work", type: "claude", name: "Claude work", spendToday: 9),
+            InstanceReading(id: "Claude personal", type: "claude", name: "Claude personal"),
+            InstanceReading(id: "Codex", type: "codex", name: "Codex"),
         ]
-        let out = Store.carrySpend(fresh, from: old)
-        XCTAssertEqual(out[0].spendToday ?? -1, 9.5, accuracy: 0.0001)
-        XCTAssertNil(out[1].spendToday) // no previous row for this name
+        let out = Providers.attachSpend(readings, enabled: enabled,
+                                        today: ["claude": 12.5, "codex": 0])
+        // rows with no spend left to show are hidden, so look up by name
+        XCTAssertEqual(out.first { $0.name == "Claude work" }?.spendToday ?? -1, 12.5, accuracy: 0.0001)
+        XCTAssertNil(out.first { $0.name == "Claude personal" })
+        XCTAssertNil(out.first { $0.name == "Codex" })
     }
-}
 
-extension StoreTests {
-    func testScanCadence() {
+    func testAttachSpendClearsStaleValues() {
+        let reading = InstanceReading(id: "Claude", type: "claude", name: "Claude", spendToday: 4)
+        let out = Providers.attachSpend([reading], enabled: [ProviderInstance(type: "claude", name: "Claude")],
+                                        today: [:])
+        XCTAssertTrue(out.isEmpty)
+    }
+
+    func testDailyByProviderBucketsRowsIntoFixedWindows() {
+        let today = SummaryClient.dayString(Date())
+        let summary = Summary(generatedAt: "", today: today, days: 30,
+                              rows: [SummaryRow(day: today, host: "mac", provider: "claude", spent: 2, tokens: 10)],
+                              todayByProvider: ["claude": 2], todayByHost: ["mac": 2], todayTotal: 2)
+        let daily = SummaryClient.dailyByProvider(summary, days: 30)
+        XCTAssertEqual(daily["claude"]?.count, 30)
+        XCTAssertEqual(daily["claude"]?.last ?? 0, 2, accuracy: 0.0001)
+        XCTAssertEqual(SummaryClient.dailyTotal(summary, days: 30).last ?? 0, 2, accuracy: 0.0001)
+    }
+
+    func testDueInstancesHonoursIntervals() {
         let now = Date()
-        XCTAssertTrue(Store.scanDue(now: now, lastScan: nil, force: false, every: 600))
-        XCTAssertFalse(Store.scanDue(now: now, lastScan: now.addingTimeInterval(-599),
-                                     force: false, every: 600))
-        XCTAssertTrue(Store.scanDue(now: now, lastScan: now.addingTimeInterval(-600),
-                                    force: false, every: 600))
-        XCTAssertTrue(Store.scanDue(now: now, lastScan: now.addingTimeInterval(-1),
-                                    force: true, every: 600))
-    }
-}
-
-extension StoreTests {
-    func testEstimatedDaysFlagsOnlyEstimatedRows() {
-        let day = CostScan.startOfToday
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        let spend = ["opencode": [
-            CostScan.Spend(day: day, project: "/p", model: "a", spent: 1, estimated: true),
-            CostScan.Spend(day: day, project: "/p", model: "b", spent: 2),
-        ]]
-        let set = Store.estimatedDays(spend)
-        XCTAssertTrue(set.contains("opencode|" + fmt.string(from: day)))
-        XCTAssertFalse(Store.estimatedDays(["vercel": [
-            CostScan.Spend(day: day, project: "", model: "m", spent: 3),
-        ]]).contains("vercel|" + fmt.string(from: day)))
+        let provider = ProviderInstance(type: "claude", name: "Claude", intervalMinutes: 5)
+        XCTAssertEqual(Store.dueInstances([provider], lastFetch: [:], now: now, force: false,
+                                          globalIntervalMinutes: 5), ["Claude"])
+        XCTAssertEqual(Store.dueInstances([provider], lastFetch: ["Claude": now], now: now, force: false,
+                                          globalIntervalMinutes: 5), [])
+        XCTAssertEqual(Store.dueInstances([provider], lastFetch: ["Claude": now], now: now, force: true,
+                                          globalIntervalMinutes: 5), ["Claude"])
     }
 }

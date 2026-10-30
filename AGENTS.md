@@ -15,7 +15,7 @@ swift test --package-path menubar                      # unit tests
 swift build -c release --package-path menubar          # release build
 menubar/.build/debug/meter --print                     # one refresh, table to stdout
 ./install.sh                                           # release build + LaunchAgent
-launchctl kickstart -k gui/$(id -u)/app.meter.meter   # restart the running agent
+launchctl kickstart -k gui/$(id -u)/app.meter.menubar   # restart the running agent
 
 cd collector && cargo run -- --dry-run                 # scan this host, no push
 cd dashboard && npm run dev                            # dashboard + D1 locally
@@ -53,29 +53,32 @@ menubar/
   Package.swift
   Sources/meter/
     MeterApp.swift     @main, MenuBarExtra scene, accessory activation, bar title
-    Store.swift        main-actor state: config, readings, poll loop
+    Store.swift        main-actor state: config, readings, summary, poll loop
     Config.swift       config model + decode, keychain/env/auth key resolution
     Keychain.swift     generic + internet-password reads, cached per launch
     HTTP.swift         URLSession helpers, error types, ISO date parsing
     Reading.swift      InstanceReading / UsageWindow models, aggregation
-    Providers.swift    registry: type string -> fetcher, fan-out, cost attachment
-    CostScan.swift     today-$ scans: Codex rollouts + gateway codex usage,
-                      Claude projects + Desktop stores, opencode.db, pi/OMP
-                      sessions, fx gateway log
-    Ledger.swift       writable sqlite: daily spend rows + quota snapshots
+    Providers.swift    registry: type string -> fetcher, fan-out, summary spend
+    Summary.swift      /api/summary client, daily buckets, offline cache
     Notifier.swift     threshold alerts (pure decision + UNUserNotificationCenter)
-    Pricing.swift      models.dev price table, cached in ~/.cache/meter/models.json
-    SQLite.swift       thin readonly libsqlite3 wrapper
+    SQLite.swift       thin readonly libsqlite3 wrapper (credential store)
     PrintMode.swift    --print / --json one-shot modes
     MenuView.swift     dropdown rows, bars, countdowns
     Providers/*.swift  one file per provider type (config `options` holds
                       provider-specific settings, e.g. Cloudflare account/gateway)
   Tests/MeterTests/    XCTest, no host app
-collector/           Rust agent for remote hosts (Cargo)
+collector/           Rust agent that scans every host (Cargo)
 dashboard/           Next.js dashboard + ingest/summary APIs (Cloudflare Workers + D1)
 docs/                user and development docs
-install.sh           menubar build + app bundle + LaunchAgent
+install.sh           menubar build + app bundle + LaunchAgents (app + collector)
 ```
+
+## Collection
+
+The collector is the only code that scans logs or prices tokens. It runs on
+every host, including the Mac, and pushes to the Worker. The menubar fetches
+quotas and credits from providers and reads spend from `/api/summary`; it has
+no scanners, no pricing table, and does not write the ledger.
 
 ## Conventions
 

@@ -29,30 +29,26 @@ final class Store: ObservableObject {
     @Published var lastRefresh: Date?
     @Published var isRefreshing = false
     private var pollTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
     private var lastFetch: [String: Date] = [:]
+    private var lastSummary: Date?
+    private var latestSummary: Summary?
     private var refreshInFlight = false
     private var queuedForce = false
-    private var lastScanAt: Date?
-    private var lastDeepScan: Date?
-    /// Last scan's per-provider today totals, reused on fetch-only refreshes.
-    private var lastToday: [String: Double] = [:]
-
-    /// Spending is a day bucket, so the scan window cannot be shorter than today;
-    /// cadence is what keeps it cheap. Every tick checks whether a pass is due.
-    /// A 2-day pass every 10 minutes tracks live sessions; a 30-day reconcile
-    /// every 6 hours catches resumed sessions that write into older days.
-    private static let recentScanDays = 2
-    private static let historyScanDays = 30
-    private static let scanEvery: TimeInterval = 10 * 60
-    private static let deepScanEvery: TimeInterval = 6 * 60 * 60
 
     init(config: Config) {
         self.config = config
-        // last known readings survive restarts, so the bar never blanks at $0
-        // while the first refresh scans and fetches
+        // cached readings and summary keep the bar and history populated across
+        // launches, before the first network round trip returns
         if let data = try? Data(contentsOf: Self.readingsCacheURL),
            let cached = try? JSONDecoder().decode([InstanceReading].self, from: data) {
             readings = cached
+        }
+        if let summary = SummaryClient.cached() {
+            latestSummary = summary
+            history = Self.historyLines(SummaryClient.dailyByProvider(summary, days: 30))
+            readings = Providers.attachSpend(readings, enabled: config.providers.filter(\.enabled),
+                                             today: summary.todayByProvider)
         }
     }
 
@@ -69,9 +65,6 @@ final class Store: ObservableObject {
     }
 
     var totalToday: Double { readings.totalToday }
-
-    /// Providers whose spend is billed money rather than a list-price estimate.
-    nonisolated static let reportedProviders: Set<String> = ["opencode", "vercel"]
 
     struct HistoryLine: Identifiable, Equatable {
         let id: String
@@ -94,70 +87,28 @@ final class Store: ObservableObject {
         return "$" + whole + grouped + "." + (parts.first.map(String.init) ?? "00")
     }
 
-    /// "Last 7/30 days" totals with per-day bars, from the same device-wide
-    /// scans that feed today's spend.
+    /// "Last 7/30 days" totals with per-day bars, from the same cross-machine
+    /// summary the menu total comes from.
     nonisolated static func historyLines(_ daily: [String: [Double]]) -> [HistoryLine] {
-        func sum(_ d: [Double], _ n: Int) -> Double { d.prefix(n).reduce(0, +) }
+        func sum(_ d: [Double], _ n: Int) -> Double { d.suffix(n).reduce(0, +) }
         var lines: [HistoryLine] = []
         for (id, label, n) in [("7d", "Last 7 days", 7), ("30d", "Last 30 days", 30)] {
             let total = daily.reduce(0.0) { $0 + sum($1.value, n) }
             guard total > 0.004 else { continue }
-            // per-day sums, oldest first, normalized against the max day
             let daySums = (0..<n).map { i in
-                daily.values.reduce(0.0) { $0 + ($1.count > i ? $1[i] : 0) }
+                daily.values.reduce(0.0) { sum, values in
+                    guard values.count >= n else { return sum }
+                    let value = values[values.count - n + i]
+                    return sum + (value.isFinite ? value : 0)
+                }
             }
             let max = daySums.max() ?? 0
-            let spark = max > 0 ? daySums.reversed().map { $0 / max } : []
+            let spark = max > 0 ? daySums.map { $0 / max } : []
             lines.append(HistoryLine(id: id, label: label,
                                      total: Self.dollars(total),
                                      spark: spark))
         }
         return lines
-    }
-
-    /// The menu's history arrays: the ledger is the durable source of truth
-    /// (imported history, pruned logs), while live scans cover days the ledger
-    /// has not recorded yet. Taking the larger per day never double-counts.
-    nonisolated static func historyDaily(scans: [String: [Double]], ledger: [Double]) -> [String: [Double]] {
-        var scanned = Array(repeating: 0.0, count: ledger.count)
-        for values in scans.values {
-            for i in 0..<min(scanned.count, values.count) {
-                scanned[i] += values[i]
-            }
-        }
-        return ["total": (0..<ledger.count).map { max(ledger[$0], scanned[$0]) }]
-    }
-
-    /// The menubar shows one "Other" row, but the ledger/dashboard should keep
-    /// the real provider. Split the "other" bucket back out by `Spend.provider`.
-    nonisolated static func ledgerSpend(_ spend: [String: [CostScan.Spend]]) -> [String: [CostScan.Spend]] {
-        guard let catchAll = spend["other"] else { return spend }
-        var out = spend
-        out.removeValue(forKey: "other")
-        for row in catchAll {
-            out[row.provider.isEmpty ? "other" : row.provider, default: []].append(row)
-        }
-        return out
-    }
-
-    /// Today's per-provider spend for the menu bar and rows: the ledger's value
-    /// (which already includes scans plus anything imported) wins; the live scan
-    /// covers the window before the ledger's first write.
-    nonisolated static func mergeToday(scans: [String: Double], ledger: [String: Double]) -> [String: Double] {
-        var out = ledger
-        for (type, value) in scans { out[type] = max(out[type] ?? 0, value) }
-        return out
-    }
-
-    /// Keep the previous spend values on rows that have not been re-priced yet,
-    /// so publishing fresh quota data early does not blank the $ column.
-    nonisolated static func carrySpend(_ readings: [InstanceReading],
-                                       from previous: [InstanceReading]) -> [InstanceReading] {
-        var out = readings
-        for i in out.indices where out[i].spendToday == nil {
-            out[i].spendToday = previous.first { $0.name == out[i].name }?.spendToday
-        }
-        return out
     }
 
     func startPolling() {
@@ -178,29 +129,6 @@ final class Store: ObservableObject {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
-    }
-
-    private var reconnectTask: Task<Void, Never>?
-
-    /// (provider|yyyy-MM-dd) pairs whose spend was priced from tokens rather
-    /// than reported by the provider, used for the ledger's `source` column.
-    nonisolated static func estimatedDays(_ spend: [String: [CostScan.Spend]]) -> Set<String> {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        var out = Set<String>()
-        for (provider, rows) in spend {
-            for row in rows where row.estimated {
-                out.insert(provider + "|" + fmt.string(from: row.day))
-            }
-        }
-        return out
-    }
-
-    /// A log pass is due on the regular cadence, on the deeper reconcile, or on
-    /// a forced (manual/reconnect) refresh.
-    nonisolated static func scanDue(now: Date, lastScan: Date?, force: Bool,
-                                    every: TimeInterval) -> Bool {
-        force || lastScan.map { now.timeIntervalSince($0) >= every } ?? true
     }
 
     /// One refresh at a time; a manual refresh that lands mid-cycle is queued and
@@ -236,113 +164,48 @@ final class Store: ObservableObject {
             config.providers, lastFetch: lastFetch, now: now,
             force: force, globalIntervalMinutes: config.intervalMinutes)
         let due = config.providers.filter { dueNames.contains($0.name) }
-
-        // Cadence, not window size, is what keeps the log pass cheap: a 2-day
-        // pass every 10 minutes tracks live sessions; a 30-day reconcile every
-        // few hours catches resumed sessions that write into older days.
-        let deep = Self.scanDue(now: now, lastScan: lastDeepScan,
-                                force: force, every: Self.deepScanEvery)
-        let scanDue = Self.scanDue(now: now, lastScan: lastScanAt,
-                                   force: force, every: Self.scanEvery)
-        guard !due.isEmpty || scanDue else { return }
+        let summaryDue = force || lastSummary.map {
+            now.timeIntervalSince($0) >= SummaryClient.cacheInterval
+        } ?? true
+        guard !due.isEmpty || summaryDue else { return }
 
         Keychain.setInteraction(interactive)
         defer { Keychain.setInteraction(false) }
 
-        let types = Set(config.providers.filter(\.enabled).map(\.type))
-        let days = deep ? Self.historyScanDays : Self.recentScanDays
-        // the log pass and the network fetches touch different data, so run them
-        // together instead of adding one latency to the other on a manual refresh
-        var scan: Task<[String: [CostScan.Spend]], Never>?
-        var pricing: Pricing?
-        if scanDue {
-            let table = await Pricing.load()
-            pricing = table
-            scan = Task.detached {
-                CostScan.spendTotals(days: days, types: types, pricing: table)
-            }
-        }
-        // deferred instances (interval not reached, or 429 backoff) keep their last reading
-        let fresh = due.isEmpty ? [] : await Providers.fetchAll(due)
+        let collector = config.collector
+        async let fetched = Providers.fetchAll(due)
+        async let summaryResult: Summary? = {
+            guard summaryDue, let collector else { return nil }
+            return await SummaryClient.fetch(config: collector)
+        }()
+        let fresh = await fetched
+        let summary = await summaryResult
+
         var merged: [InstanceReading] = []
         for p in config.providers where p.enabled {
-            if let r = fresh.first(where: { $0.name == p.name }) {
-                merged.append(r)
+            if let reading = fresh.first(where: { $0.name == p.name }) {
+                merged.append(reading)
                 lastFetch[p.name] = Date()
             } else if let old = readings.first(where: { $0.name == p.name }) {
                 merged.append(old)
             }
         }
-        if !fresh.isEmpty {
-            // publish quota data now: the log scans below are not instant, and a
-            // manual refresh should visibly change the menu as soon as it returns
-            readings = Providers.hideEmpty(Self.carrySpend(merged, from: readings))
-        }
+        readings = merged
 
-        var today = lastToday
-        if let scan {
-            let spend = await scan.value
-            let todayScan = CostScan.dailyTotals(spend, days: 1).mapValues { $0.first ?? 0 }
-            today = Self.mergeToday(scans: todayScan, ledger: Ledger.shared.todayByProvider())
-            if let collector = config.collector, collector.enabled {
-                // push the local day, then add every other host's day back in;
-                // exclude_host keeps this machine's own rows out of the sum
-                await Collector.push(spend, config: collector)
-                for (type, value) in await Collector.today(config: collector) {
-                    today[type, default: 0] += value
-                }
-            }
-            lastToday = today
-            lastScanAt = now
-            if deep { lastDeepScan = now }
-            let daily = CostScan.dailyTotals(spend, days: days)
-            history = Self.historyLines(Self.historyDaily(scans: daily,
-                                                          ledger: Ledger.shared.recentDailyTotals(days: 30)))
-            let enabled = config.providers.filter(\.enabled)
-            let targets = Providers.costTargetNames(enabled: enabled)
-            let gen = pricing?.generation ?? .distantPast
-            let backfillNeeded = Ledger.shared.meta("backfilled") == nil
-            let typesForBackfill = types
-            // ledger/dashboard keep the real provider behind "other"; the menubar
-            // row above stays aggregated, which is why this is separate from `daily`
-            let ledgerSpend = Self.ledgerSpend(spend)
-            let ledgerDaily = CostScan.dailyTotals(ledgerSpend, days: days)
-            let estimated = Self.estimatedDays(ledgerSpend)
-            Task.detached {
-                Ledger.shared.recordDaily(ledgerDaily, targetNames: targets,
-                                          pricingGen: gen, reported: Self.reportedProviders,
-                                          estimatedDays: estimated)
-                Ledger.shared.recordBreakdown(ledgerSpend, targetNames: targets,
-                                              pricingGen: gen, reported: Self.reportedProviders)
-                if backfillNeeded {
-                    // one-time: seed the ledger with longer history from the same scans
-                    let widePricing = await Pricing.load()
-                    let wideSpend = CostScan.spendTotals(days: 90, types: typesForBackfill, pricing: widePricing)
-                    let wideLedger = Self.ledgerSpend(wideSpend)
-                    let wide = CostScan.dailyTotals(wideLedger, days: 90)
-                    let wideEstimated = Self.estimatedDays(wideLedger)
-                    Ledger.shared.recordDaily(wide, targetNames: targets,
-                                              pricingGen: widePricing.generation,
-                                              reported: Self.reportedProviders,
-                                              estimatedDays: wideEstimated)
-                    Ledger.shared.recordBreakdown(wideLedger, targetNames: targets,
-                                                  pricingGen: widePricing.generation,
-                                                  reported: Self.reportedProviders)
-                    Ledger.shared.setMeta("backfilled", ISO8601DateFormatter().string(from: Date()))
-                }
-            }
+        if let summary {
+            lastSummary = now
+            latestSummary = summary
+            history = Self.historyLines(SummaryClient.dailyByProvider(summary, days: 30))
         }
-        readings = Providers.attachLocalCosts(
-            readings, enabled: config.providers.filter(\.enabled), today: today)
-        let snapshot = readings
-        let hadFetch = !fresh.isEmpty
-        Task.detached {
-            Self.persist(snapshot)
-            if hadFetch { Ledger.shared.recordQuotaSnapshots(snapshot) }
-        }
+        readings = Providers.attachSpend(
+            readings, enabled: config.providers.filter(\.enabled),
+            today: latestSummary?.todayByProvider ?? [:])
+
         let names = Set(config.providers.map(\.name))
         lastFetch = lastFetch.filter { names.contains($0.key) }
         lastRefresh = Date()
+        let snapshot = readings
+        Task.detached { Self.persist(snapshot) }
     }
 
     /// Which instances should fetch right now: force bypasses intervals but never

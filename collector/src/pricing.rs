@@ -42,11 +42,13 @@ fn parse_cost(v: &Value) -> Cost {
     }
 }
 
-fn beats(candidate: Cost, official: bool, existing: Cost, existing_official: bool) -> bool {
-    if official != existing_official {
-        return official;
+/// Official beats reseller; within the same tier the higher list price wins so
+/// zero-cost mirrors never shadow a real price.
+fn beats(candidate: Cost, candidate_official: bool, existing: (bool, Cost)) -> bool {
+    if candidate_official != existing.0 {
+        return candidate_official;
     }
-    candidate.input + candidate.output > existing.input + existing.output
+    candidate.input + candidate.output > existing.1.input + existing.1.output
 }
 
 impl Pricing {
@@ -54,7 +56,7 @@ impl Pricing {
         refresh(cache);
         let text = fs::read_to_string(cache).unwrap_or_default();
         let root: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-        let mut models: HashMap<String, Cost> = HashMap::new();
+        let mut models: HashMap<String, (bool, Cost)> = HashMap::new();
         let mut by_provider: HashMap<String, HashMap<String, Cost>> = HashMap::new();
         if let Value::Object(providers) = &root {
             for (provider, body) in providers {
@@ -70,18 +72,32 @@ impl Pricing {
                     let parsed = parse_cost(cost);
                     let key = id.to_lowercase();
                     entry.insert(key.clone(), parsed);
-                    match models.get(&key).copied() {
-                        Some(existing) if !beats(parsed, official, existing, official) => {}
-                        _ => {
-                            models.insert(key, parsed);
+                    if let Some(existing) = models.get(&key).copied() {
+                        if !beats(parsed, official, existing) {
+                            continue;
                         }
                     }
+                    models.insert(key, (official, parsed));
                 }
             }
         }
         Pricing {
-            models,
+            models: models
+                .into_iter()
+                .map(|(key, (_, cost))| (key, cost))
+                .collect(),
             by_provider,
+        }
+    }
+
+    /// Rates are irrelevant to the day-bucketing test; any known model will do.
+    #[cfg(test)]
+    pub fn with_rate(model: &str, cost: Cost) -> Pricing {
+        let mut models = HashMap::new();
+        models.insert(model.to_string(), cost);
+        Pricing {
+            models,
+            by_provider: HashMap::new(),
         }
     }
 
@@ -119,8 +135,8 @@ impl Pricing {
             + output / 1e6 * cost.output
     }
 
-    // Codex rollouts are not scanned yet; the rate shape is kept for them.
-    #[allow(dead_code)]
+    /// Codex reports cached input as a subset of input, so it is repriced at
+    /// the cache rate instead of double counting.
     pub fn codex(&self, cost: Cost, input: f64, cached_input: f64, output: f64) -> f64 {
         let cached = cached_input.min(input);
         (input - cached) / 1e6 * cost.input

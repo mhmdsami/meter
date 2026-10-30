@@ -27,17 +27,15 @@ menubar/
   Keychain.swift     generic and internet-password reads
   HTTP.swift         URLSession helpers and error types
   Reading.swift      InstanceReading and UsageWindow
-  Providers.swift    registry, fan-out, local cost attribution
-  CostScan.swift     local log and database scans
-  Ledger.swift       SQLite ledger writes and reads
+  Providers.swift    registry, fan-out, summary spend attachment
+  Summary.swift      work summary client and cache
   Notifier.swift     threshold alerts
-  Pricing.swift      models.dev price table
   SQLite.swift       small read-only SQLite wrapper
   PrintMode.swift    --print / --json
   MenuView.swift     dropdown rows and bars
   Providers/*.swift  one file per provider type
   Tests/MeterTests/    XCTest, no host app
-collector/           Rust agent: scans a remote host, pushes rows to the Worker
+collector/           Rust agent: scans a host, pushes rows to the Worker
 dashboard/           Next.js dashboard + APIs on Cloudflare Workers/D1
 ```
 
@@ -54,14 +52,12 @@ system frameworks only, and comments only where a constraint is not obvious.
    `meter/<name>`; see `Secrets.apiKey` in `Config.swift`.
 4. Throw `ProviderError` for failures. The menu shows the message per instance.
    Return an empty reading for "signed in, nothing to track".
-5. If spend comes from a local log scan, add a `LocalCostSource` in
-   `Providers.swift` and decide which instance its device-wide total attaches
-   to.
-6. Add a fixture-based test for any parsing logic.
+5. Add a fixture-based test for any parsing logic.
 
 `Providers/OpenRouter.swift` is the shortest complete example.
 
 ## Tests
 
-`Tests/MeterTests/` has parser and ledger tests. They do not launch the app.
-Add a fixture test for every new parser.
+`Tests/MeterTests/` has provider parsing and summary tests. They do not launch
+the app. Log parsers live in the collector and are tested there with `cargo
+test`.
