@@ -61,6 +61,26 @@ function shiftDay(day: string, offset: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+function dayDate(day: string): Date {
+  const [year, month, date] = day.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, date));
+}
+
+/// "Nov 2" for tight axes and tooltips.
+function shortDay(day: string): string {
+  return dayDate(day).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+/// "Sun, Nov 2" where there is room for the weekday.
+function weekdayDay(day: string): string {
+  return dayDate(day).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 function money(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 }
@@ -90,9 +110,10 @@ function add(map: Map<string, Bucket>, key: string, row: Row) {
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   const total = payload.reduce((sum: number, item: any) => sum + (item.value ?? 0), 0);
+  const heading = payload[0]?.payload?.range ?? label;
   return (
     <div className="min-w-40 rounded-md border border-border bg-popover px-3 py-2 text-xs shadow-[var(--shadow-overlay)]">
-      <div className="mb-1.5 font-medium">{label}</div>
+      <div className="mb-1.5 font-medium">{heading}</div>
       {payload.map((item: any) => (
         <div key={item.dataKey} className="flex items-center justify-between gap-5 text-muted-foreground">
           <span className="flex items-center gap-1.5">
@@ -272,28 +293,45 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
   const todayTotal = todayRows.reduce((sum, row) => sum + row.spent, 0);
   const yesterdayTotal = yesterdayRows.reduce((sum, row) => sum + row.spent, 0);
   const delta = yesterdayTotal > 0 ? ((todayTotal - yesterdayTotal) / yesterdayTotal) * 100 : null;
-  const last7 = inScope.filter((row) => row.day >= dayString(-6)).reduce((sum, row) => sum + row.spent, 0);
+
+  // Sparse days make a 90-day area chart dive to zero between them, which reads
+  // as gaps. Past 30 days the trend is shown in weekly buckets instead.
+  const bucketDays = days > 30 ? 7 : 1;
 
   const series = useMemo(() => {
-    const byDay = new Map<string, Map<string, number>>();
-    for (const row of filtered) {
-      const map = byDay.get(row.day) ?? new Map<string, number>();
-      map.set(row.provider, (map.get(row.provider) ?? 0) + row.spent);
-      byDay.set(row.day, map);
-    }
-    return Array.from({ length: days }, (_, index) => {
-      const day = dayString(-(days - 1 - index));
-      const parts = byDay.get(day) ?? new Map<string, number>();
-      const point: Record<string, number | string> = { day, label: day.slice(5) };
-      let total = 0;
-      for (const [name, value] of parts) {
-        point[name] = value;
-        total += value;
-      }
-      point.total = total;
-      return point;
+    const buckets = Math.ceil(days / bucketDays);
+    const points = Array.from({ length: buckets }, (_, index) => {
+      const start = dayString(-(days - 1) + index * bucketDays);
+      const end = dayString(-(days - 1) + index * bucketDays + bucketDays - 1);
+      return {
+        start,
+        // biome-ignore lint/complexity/useMathMinMax: compares ISO day strings
+        end: end > today ? today : end,
+        label: shortDay(start),
+        total: 0,
+        values: new Map<string, number>(),
+      };
     });
-  }, [filtered, days]);
+    const indexOf = new Map<string, number>();
+    for (let i = 0; i < days; i++) indexOf.set(dayString(-(days - 1) + i), Math.floor(i / bucketDays));
+    for (const row of filtered) {
+      const index = indexOf.get(row.day);
+      if (index === undefined) continue;
+      const point = points[index];
+      point.values.set(row.provider, (point.values.get(row.provider) ?? 0) + row.spent);
+      point.total += row.spent;
+    }
+    return points.map((point) => {
+      const out: Record<string, number | string> = {
+        day: point.start,
+        label: point.label,
+        total: point.total,
+      };
+      if (bucketDays > 1 && point.end !== point.start) out.range = `${shortDay(point.start)} – ${shortDay(point.end)}`;
+      for (const [name, value] of point.values) out[name] = value;
+      return out;
+    });
+  }, [filtered, days, bucketDays, today]);
 
   const providerTotals = useMemo(() => {
     const map = new Map<string, Bucket>();
@@ -375,13 +413,7 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:py-10">
       <header className="animate-fade-up flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="font-display text-3xl tracking-tight">meter</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            AI usage across {hosts.length || 0} machine{hosts.length === 1 ? "" : "s"}
-            {loading ? " · syncing…" : ` · ${rows.length.toLocaleString()} rows`}
-          </p>
-        </div>
+        <h1 className="font-display text-2xl tracking-tight">meter</h1>
         <div className="flex items-center gap-2">
           <div className="flex items-center rounded-md border border-border p-0.5">
             {RANGES.map((value) => (
@@ -406,11 +438,11 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
 
       {error ? <p className="mt-4 text-xs text-destructive">{error}</p> : null}
 
-      <section className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <section className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard
           label="Today"
           value={money(todayTotal)}
-          sub={delta === null ? todayKey : `${delta >= 0 ? "+" : ""}${delta.toFixed(0)}% vs yesterday`}
+          sub={delta === null ? weekdayDay(todayKey) : `${delta >= 0 ? "+" : ""}${delta.toFixed(0)}% vs yesterday`}
           className="sm:col-span-2"
           delay={0}
         >
@@ -426,14 +458,7 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
             </div>
           </div>
         </StatCard>
-        <StatCard label="Last 7 days" value={money(last7)} sub="across all filtered hosts" delay={60} />
-        <StatCard
-          label={`Last ${days}d`}
-          value={money(rangeTotal)}
-          sub={`${filtered.length.toLocaleString()} rows`}
-          delay={120}
-        />
-        <StatCard label="Tokens" value={compact(rangeTokens)} sub="input + output + cache" delay={180} />
+        <StatCard label="Tokens" value={compact(rangeTokens)} sub="input + output + cache" delay={60} />
       </section>
 
       <section className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -474,7 +499,11 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
             <div>
               <h2 className="text-sm font-medium">{days === 1 ? "Today by provider" : "Daily spend"}</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {days === 1 ? "Share of today's spend" : `Stacked by provider · last ${days} days`}
+                {days === 1
+                  ? "Share of today's spend"
+                  : bucketDays > 1
+                    ? `Stacked by provider · weekly, last ${days} days`
+                    : `Stacked by provider · last ${days} days`}
               </p>
             </div>
             {days === 1 ? null : (
@@ -547,6 +576,7 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
                       stroke={colorFor(name, palette)}
                       strokeWidth={1.5}
                       fill={`url(#fill-${name})`}
+                      activeDot={{ r: 3, strokeWidth: 0 }}
                       animationDuration={450}
                       animationEasing="ease-out"
                     />
@@ -704,7 +734,7 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
               {pageRows.map(([day, entry]) => (
                 <TableRow key={day} className="border-border/60">
                   <TableCell className="w-full whitespace-nowrap px-0 py-2 pr-6 text-xs tabular-nums">
-                    {day}
+                    {weekdayDay(day)}
                     <div className="mt-1 flex flex-wrap gap-1 sm:hidden">
                       {[...entry.hosts.entries()]
                         .sort((a, b) => b[1] - a[1])

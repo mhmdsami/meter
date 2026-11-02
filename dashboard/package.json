@@ -18,6 +18,7 @@
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.0",
     "drizzle-orm": "^0.45.4",
+    "geist": "^1.9.0",
     "lucide-react": "^1.61.0",
     "next": "^16.4.3",
     "react": "^19.3.1",
