@@ -140,7 +140,6 @@
 
 @utility type-display {
   font-family: var(--font-display);
-  /* Geist Serif shape axis: 0 regular, 25 square, 50 triangle, 100 heart */
   font-variation-settings: "ELSH" var(--display-elsh, 0);
   font-weight: 400;
   letter-spacing: -0.02em;

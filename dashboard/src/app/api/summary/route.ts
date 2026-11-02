@@ -15,18 +15,23 @@ export async function GET(request: Request) {
   const start = since.toISOString().slice(0, 10);
   const excludeHost = url.searchParams.get("exclude_host");
 
-  const { results } = await env()
-    .DB.prepare(
-      `SELECT day, host, provider, SUM(spent) AS spent, SUM(tokens) AS tokens
-       FROM usage_rows
-       WHERE day >= ? AND day <= ?${excludeHost ? " AND host != ?" : ""}
-       GROUP BY day, host, provider
-       ORDER BY day, host, provider`,
-    )
-    .bind(...(excludeHost ? [start, today, excludeHost] : [start, today]))
-    .all<{ day: string; host: string; provider: string; spent: number; tokens: number }>();
-
-  const rows = results ?? [];
+  const rows: { day: string; host: string; provider: string; spent: number; tokens: number }[] = [];
+  const binds = excludeHost ? [start, today, excludeHost] : [start, today];
+  for (let offset = 0; ; offset += 500) {
+    const { results } = await env()
+      .DB.prepare(
+        `SELECT day, host, provider, SUM(spent) AS spent, SUM(tokens) AS tokens
+         FROM usage_rows
+         WHERE day >= ? AND day <= ?${excludeHost ? " AND host != ?" : ""}
+         GROUP BY day, host, provider
+         ORDER BY day, host, provider
+         LIMIT ? OFFSET ?`,
+      )
+      .bind(...binds, 500, offset)
+      .all<{ day: string; host: string; provider: string; spent: number; tokens: number }>();
+    rows.push(...results);
+    if (results.length < 500) break;
+  }
   const todayByProvider: Record<string, number> = {};
   const todayByHost: Record<string, number> = {};
   for (const row of rows) {

@@ -27,13 +27,19 @@ export function validDay(day: string | null): string | null {
 
 export async function fetchRows(days: number, today: string): Promise<UsageRow[]> {
   const since = dayBefore(today, days - 1);
-  const { results } = await env()
-    .DB.prepare(
-      `SELECT host, day, provider, project, model, spent, tokens, source
-       FROM usage_rows WHERE day >= ? AND day <= ?
-       ORDER BY day, host, provider, project, model`,
-    )
-    .bind(since, today)
-    .all<UsageRow>();
-  return results ?? [];
+  const rows: UsageRow[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const { results } = await env()
+      .DB.prepare(
+        `SELECT host, day, provider, project, model, spent, tokens, source
+         FROM usage_rows WHERE day >= ? AND day <= ?
+         ORDER BY day, host, provider, project, model
+         LIMIT ? OFFSET ?`,
+      )
+      .bind(since, today, 500, offset)
+      .all<UsageRow>();
+    rows.push(...results);
+    if (results.length < 500) break;
+  }
+  return rows;
 }
