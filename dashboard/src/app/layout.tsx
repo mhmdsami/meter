@@ -1,4 +1,4 @@
-import { GeistSerif } from "geist/font/serif";
+import { GeistSerif } from "geist/font/serif/variable";
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono } from "next/font/google";
 import "./globals.css";

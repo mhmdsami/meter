@@ -4,7 +4,7 @@ Next.js dashboard and ingestion API on Cloudflare Workers, backed by D1.
 Hosts push `(host, day, provider, project, model, spent, tokens, source)`
 rows; the dashboard aggregates them in the browser.
 
-- Tailwind 4, base-nova shadcn, Geist Mono + Instrument Serif, Recharts.
+- Tailwind 4, base-nova shadcn, Geist Mono + Geist Serif, Recharts.
 - Auth: Google via better-auth, restricted to `ALLOWED_EMAILS`.
 
 ## Setup
