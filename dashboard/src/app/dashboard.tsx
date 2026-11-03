@@ -346,6 +346,12 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
     return map;
   }, [todayRows, filtered]);
 
+  const rangeHostTotals = useMemo(() => {
+    const map = new Map<string, Bucket>();
+    for (const row of filtered) add(map, row.host, row);
+    return map;
+  }, [filtered]);
+
   const modelTotals = useMemo(() => {
     const map = new Map<string, Bucket>();
     for (const row of filtered) add(map, row.model || "(none)", row);
@@ -438,12 +444,11 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
 
       {error ? <p className="mt-4 text-xs text-destructive">{error}</p> : null}
 
-      <section className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <section className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard
           label="Today"
           value={money(todayTotal)}
           sub={delta === null ? weekdayDay(todayKey) : `${delta >= 0 ? "+" : ""}${delta.toFixed(0)}% vs yesterday`}
-          className="sm:col-span-2"
           delay={0}
         >
           <div className="flex items-end justify-between gap-6">
@@ -458,7 +463,15 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
             </div>
           </div>
         </StatCard>
-        <StatCard label="Tokens" value={compact(rangeTokens)} sub="input + output + cache" delay={60} />
+        <StatCard label={days === 1 ? "Selected day" : `Last ${days} days`} value={money(rangeTotal)} delay={60}>
+          <div className="text-xs text-muted-foreground">
+            {[...rangeHostTotals.entries()]
+              .sort((a, b) => b[1].spent - a[1].spent)
+              .map(([name, bucket]) => `${name} ${money(bucket.spent)}`)
+              .join(" · ") || "no rows in range"}
+          </div>
+        </StatCard>
+        <StatCard label="Tokens" value={compact(rangeTokens)} sub="input + output + cache" delay={120} />
       </section>
 
       <section className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
