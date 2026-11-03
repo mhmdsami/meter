@@ -62,15 +62,17 @@ enum Providers {
         return readings
     }
 
-    /// The summary reports spend per provider type, so the total attaches to the
-    /// first enabled instance of that type. Extra instances of the same provider
-    /// cannot be told apart server-side and show quota only.
+    /// The summary reports spend per provider type, not per account or key. When a
+    /// type has exactly one instance the total belongs to it; with several
+    /// instances the split is unknowable, so those rows show limits only and the
+    /// spend stays in the day total.
     static func attachSpend(_ readings: [InstanceReading], enabled: [ProviderInstance],
                             today: [String: Double]) -> [InstanceReading] {
         var out = readings
         for i in out.indices { out[i].spendToday = nil }
         for (type, value) in today where value > 0.004 {
-            guard let name = enabled.first(where: { $0.type == type })?.name,
+            let ofType = enabled.filter { $0.type == type }
+            guard ofType.count == 1, let name = ofType.first?.name,
                   let index = out.firstIndex(where: { $0.name == name }) else { continue }
             out[index].spendToday = value
         }

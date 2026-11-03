@@ -24,23 +24,23 @@ final class StoreTests: XCTestCase {
         XCTAssertTrue(Store.historyLines(["anthropic": series([])]).isEmpty)
     }
 
-    func testAttachSpendUsesTheFirstInstanceOfEachType() {
+    func testAttachSpendSkipsTypesWithSeveralInstances() {
         let enabled = [
             ProviderInstance(type: "claude", name: "Claude work"),
             ProviderInstance(type: "claude", name: "Claude personal"),
             ProviderInstance(type: "codex", name: "Codex"),
         ]
         let readings = [
-            InstanceReading(id: "Claude work", type: "claude", name: "Claude work", spendToday: 9),
+            InstanceReading(id: "Claude work", type: "claude", name: "Claude work"),
             InstanceReading(id: "Claude personal", type: "claude", name: "Claude personal"),
             InstanceReading(id: "Codex", type: "codex", name: "Codex"),
         ]
         let out = Providers.attachSpend(readings, enabled: enabled,
-                                        today: ["claude": 12.5, "codex": 0])
-        // rows with no spend left to show are hidden, so look up by name
-        XCTAssertEqual(out.first { $0.name == "Claude work" }?.spendToday ?? -1, 12.5, accuracy: 0.0001)
+                                        today: ["claude": 12.5, "codex": 3])
+        // the per-account split is unknowable, so Claude rows show limits only
+        XCTAssertNil(out.first { $0.name == "Claude work" })
         XCTAssertNil(out.first { $0.name == "Claude personal" })
-        XCTAssertNil(out.first { $0.name == "Codex" })
+        XCTAssertEqual(out.first { $0.name == "Codex" }?.spendToday ?? -1, 3, accuracy: 0.0001)
     }
 
     func testAttachSpendClearsStaleValues() {

@@ -57,6 +57,10 @@ enum Claude {
     }
 
     static func fetch(_ instance: ProviderInstance) async throws -> InstanceReading {
+        // accounts that claude-swap manages are read from its usage report
+        if let account = instance.options?["cswap_account"], !account.isEmpty {
+            return try Cswap.reading(instance, account: account)
+        }
         let dir = configDir(instance)
         refreshIfChanged(configDir: dir)
         // an expired token gets a 429 from Anthropic, not a 401 — surface the real

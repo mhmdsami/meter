@@ -64,7 +64,9 @@ final class Store: ObservableObject {
         try? data.write(to: url, options: .atomic)
     }
 
-    var totalToday: Double { readings.totalToday }
+    /// The summary total, not the sum of the rows: rows of a type with several
+    /// instances carry no spend, so summing them would undercount.
+    var totalToday: Double { latestSummary?.todayTotal ?? readings.totalToday }
 
     struct HistoryLine: Identifiable, Equatable {
         let id: String

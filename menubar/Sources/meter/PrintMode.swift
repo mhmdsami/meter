@@ -26,8 +26,9 @@ enum PrintMode {
             let history = summary.map {
                 Store.historyLines(SummaryClient.dailyByProvider($0, days: 30))
             } ?? []
-            print(json ? encode(config: config, readings: readings, history: history)
-                       : render(config: config, readings: readings))
+            let total = summary?.todayTotal
+            print(json ? encode(config: config, readings: readings, history: history, total: total)
+                       : render(config: config, readings: readings, total: total))
             Antigravity.shutdown()
             exit(0)
         }
@@ -41,10 +42,10 @@ enum PrintMode {
         return Int(args[idx + 1])
     }
 
-    static func render(config: Config, readings: [InstanceReading]) -> String {
+    static func render(config: Config, readings: [InstanceReading], total: Double? = nil) -> String {
         var lines: [String] = []
         if let err = config.configError { lines.append("!! \(err)") }
-        let today = readings.totalToday
+        let today = total ?? readings.totalToday
         lines.append(String(format: "today $%.2f", today))
         for r in readings {
             var head = "\(r.name) [\(r.type)]"
@@ -62,11 +63,12 @@ enum PrintMode {
     }
 
     /// Machine-readable snapshot for scripts.
-    static func encode(config: Config, readings: [InstanceReading], history: [Store.HistoryLine]) -> String {
+    static func encode(config: Config, readings: [InstanceReading], history: [Store.HistoryLine],
+                       total: Double? = nil) -> String {
         let iso = ISO8601DateFormatter()
         var root: [String: Any] = [
             "generated_at": iso.string(from: Date()),
-            "today_total": readings.totalToday,
+            "today_total": total ?? readings.totalToday,
         ]
         if let err = config.configError { root["config_error"] = err }
         root["instances"] = readings.map { r -> [String: Any] in

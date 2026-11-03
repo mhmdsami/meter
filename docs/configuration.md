@@ -84,25 +84,39 @@ only one, or lists the choices in the error.
 
 ## Claude accounts
 
-Claude Code keeps one login per config directory, selected with
-`CLAUDE_CONFIG_DIR`. Give each account its own directory and meter can show
-their limits side by side:
+Two ways to track more than one Claude login.
+
+**claude-swap** (`cswap`) keeps several logins and rotates them when one nears
+its limit. Meter reads cswap's own usage report, so every account shows up at
+once and meter never touches credentials:
+
+```json
+{ "type": "claude", "name": "Claude Work",
+  "options": { "cswap_account": "you@company.com" } }
+```
+
+`cswap_account` takes the email or the slot number from `cswap list`. Use one
+instance per account, and set `options.cswap_bin` if cswap is somewhere other
+than `~/.local/bin`, `/opt/homebrew/bin`, or `/usr/local/bin`.
+
+**Without cswap**, give each account its own config directory and point meter
+at it:
 
 ```sh
 alias claude-personal='CLAUDE_CONFIG_DIR=~/.claude-personal claude'
 ```
-
-Run `claude-personal` once and sign in with the second account, then add an
-instance:
 
 ```json
 { "type": "claude", "name": "Claude Personal",
   "options": { "config_dir": "~/.claude-personal" } }
 ```
 
-Omit `config_dir` for the default `~/.claude` login. macOS keys the keychain
-item to the directory, so the two accounts do not share a token. Switching
-which account the CLI uses is the alias above; meter keeps showing both.
+Omit both options for the default `~/.claude` login. macOS keys the keychain
+item to the directory, so the two accounts do not share a token.
+
+Spend is reported per provider, not per account. A provider with more than one
+instance shows limits only on those rows; the day total still includes all of
+it.
 
 ## OpenCode cookies
 
