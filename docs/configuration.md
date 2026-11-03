@@ -82,6 +82,28 @@ Providers that reuse a CLI login (`codex`, `claude`, `antigravity`, `amp`,
 `CLOUDFLARE_GATEWAY_ID`. If no gateway is set, meter asks the API and uses the
 only one, or lists the choices in the error.
 
+## Claude accounts
+
+Claude Code keeps one login per config directory, selected with
+`CLAUDE_CONFIG_DIR`. Give each account its own directory and meter can show
+their limits side by side:
+
+```sh
+alias claude-personal='CLAUDE_CONFIG_DIR=~/.claude-personal claude'
+```
+
+Run `claude-personal` once and sign in with the second account, then add an
+instance:
+
+```json
+{ "type": "claude", "name": "Claude Personal",
+  "options": { "config_dir": "~/.claude-personal" } }
+```
+
+Omit `config_dir` for the default `~/.claude` login. macOS keys the keychain
+item to the directory, so the two accounts do not share a token. Switching
+which account the CLI uses is the alias above; meter keeps showing both.
+
 ## OpenCode cookies
 
 OpenCode's Zen balance comes from a web RPC that only accepts a browser

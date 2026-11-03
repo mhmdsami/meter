@@ -119,6 +119,34 @@ final class ProviderParsingTests: XCTestCase {
         XCTAssertEqual(r.windows[1].usedPercent, 55)
     }
 
+    func testClaudeKeychainServiceIsNamespacedPerConfigDir() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        XCTAssertEqual(Claude.keychainService(nil), "Claude Code-credentials")
+        XCTAssertEqual(Claude.keychainService(home.appendingPathComponent(".claude")), "Claude Code-credentials")
+        let personal = Claude.keychainService(URL(fileURLWithPath: "/tmp/claude-personal"))
+        let work = Claude.keychainService(URL(fileURLWithPath: "/tmp/claude-work"))
+        XCTAssertTrue(personal.hasPrefix("Claude Code-credentials-"))
+        XCTAssertEqual(personal.count, "Claude Code-credentials-".count + 8)
+        XCTAssertNotEqual(personal, work)
+    }
+
+    func testClaudeConfigDirReadsTheNamedDirectory() {
+        let instance = ProviderInstance(type: "claude", name: "Claude Personal",
+                                       options: ["config_dir": "~/claude-personal"])
+        let dir = Claude.configDir(instance)
+        XCTAssertEqual(dir?.path, FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("claude-personal").path)
+        XCTAssertNil(Claude.configDir(ProviderInstance(type: "claude", name: "Claude")))
+    }
+
+    func testClaudeConfigDirWithoutCredentialsDoesNotFallBack() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meter-claude-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertThrowsError(try Claude.loadCredentials(configDir: dir))
+    }
+
     func testHistoryLines() {
         let daily = ["claude": Array(repeating: 10.0, count: 30).enumerated().map { Double($0.offset) + 1 },
                      "codex": [2, 0, 4, 0, 0, 0, 1] + Array(repeating: 0.0, count: 23).map { $0 }]
