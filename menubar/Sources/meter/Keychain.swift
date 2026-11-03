@@ -53,6 +53,22 @@ enum Keychain {
         ])
     }
 
+    /// Attributes-only read: returns when the item last changed without touching
+    /// the secret, so it cannot raise an authorization prompt. Callers use it to
+    /// notice a login switch and drop the cached secret.
+    static func modificationDate(service: String) -> Date? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var out: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+              let dict = out as? [String: Any] else { return nil }
+        return dict[kSecAttrModificationDate as String] as? Date
+    }
+
     private static func genericKey(_ service: String) -> String { "generic:" + service }
     private static func internetKey(_ server: String) -> String { "internet:" + server }
 

@@ -24,8 +24,41 @@ enum Claude {
         return "Claude Code-credentials-" + digest.prefix(8)
     }
 
+    /// Claude Code rewrites its credential item on `/login`, which is how an
+    /// account switch reaches us. Metadata changes without reading the secret,
+    /// so the cache is dropped only when the item actually changed.
+    private static var lastSeen: [String: Date?] = [:]
+
+    /// Last credential that worked. A rotation re-seals the keychain ACL, so a
+    /// background re-read can fail while Claude Code still holds a valid login;
+    /// keep serving that token instead of surfacing an approval error each cycle.
+    private static var lastGood: [String: Credentials] = [:]
+    private static let lastGoodLock = NSLock()
+
+    private static func remember(_ creds: Credentials, service: String) {
+        lastGoodLock.lock(); defer { lastGoodLock.unlock() }
+        lastGood[service] = creds
+    }
+
+    private static func remembered(_ service: String) -> Credentials? {
+        lastGoodLock.lock(); defer { lastGoodLock.unlock() }
+        return lastGood[service]
+    }
+
+    private static func refreshIfChanged(configDir dir: URL?) {
+        let service = keychainService(dir)
+        let keychainDate = Keychain.modificationDate(service: service)
+        let fileDate = (try? FileManager.default.attributesOfItem(atPath: credsURL(dir).path))?[.modificationDate] as? Date
+        let stamp = [keychainDate, fileDate].compactMap { $0 }.max()
+        if lastSeen[service] != stamp {
+            lastSeen[service] = stamp
+            Keychain.invalidateGeneric(service: service)
+        }
+    }
+
     static func fetch(_ instance: ProviderInstance) async throws -> InstanceReading {
         let dir = configDir(instance)
+        refreshIfChanged(configDir: dir)
         // an expired token gets a 429 from Anthropic, not a 401 — surface the real
         // problem instead of backing off on a bogus rate limit for hours
         let creds = try loadCredentials(configDir: dir)
@@ -84,12 +117,22 @@ enum Claude {
     }
 
     static func loadCredentials(configDir dir: URL? = nil) throws -> Credentials {
-        if let creds = usable(candidates(configDir: dir)) { return creds }
+        let service = keychainService(dir)
+        if let creds = usable(candidates(configDir: dir)) {
+            remember(creds, service: service)
+            return creds
+        }
         // everything we can see is expired: drop the per-launch cache and re-read,
         // in case the item rotated since it was cached
-        Keychain.invalidateGeneric(service: keychainService(dir))
+        Keychain.invalidateGeneric(service: service)
         let retried = candidates(configDir: dir)
-        if let creds = usable(retried) { return creds }
+        if let creds = usable(retried) {
+            remember(creds, service: service)
+            return creds
+        }
+        if let cached = remembered(service), cached.expiresAt.map({ $0 > Date() }) ?? true {
+            return cached
+        }
         if let newest = retried.compactMap(\.expiresAt).max() {
             let when = DateFormatter.localizedString(from: newest, dateStyle: .short, timeStyle: .short)
             throw ProviderError.badResponse("Claude credentials expired \(when) — run `claude login`")
