@@ -201,13 +201,24 @@ final class Store: ObservableObject {
         }
         readings = Providers.attachSpend(
             readings, enabled: config.providers.filter(\.enabled),
-            today: latestSummary?.todayByProvider ?? [:])
+            today: latestSummary?.todayByProvider ?? [:],
+            preferred: Self.preferredInstances(config))
 
         let names = Set(config.providers.map(\.name))
         lastFetch = lastFetch.filter { names.contains($0.key) }
         lastRefresh = Date()
         let snapshot = readings
         Task.detached { Self.persist(snapshot) }
+    }
+
+    /// The summary reports spend per provider. For Claude it lands on the account
+    /// cswap has live; other providers keep the single-instance rule.
+    nonisolated static func preferredInstances(_ config: Config) -> [String: String] {
+        guard let active = Cswap.activeEmail()?.lowercased(), !active.isEmpty else { return [:] }
+        let match = config.providers.first {
+            $0.type == "claude" && $0.options?["cswap_account"]?.lowercased() == active
+        }
+        return match.map { ["claude": $0.name] } ?? [:]
     }
 
     /// Which instances should fetch right now: force bypasses intervals but never
