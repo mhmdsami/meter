@@ -20,8 +20,11 @@ like; every instance gets its own row.
 
 `grok` reads the same billing call the official Grok CLI makes for `/usage`.
 The X Subscription shares one weekly pool across Grok, Grok Bot, and Cursor,
-so the row is the whole subscription, not one product. The CLI refreshes its
-token on its next run; when it expires meter says so instead of guessing.
+so the row is the whole subscription, not one product. The response also lists
+each product's share, which is why Grok Bot usage shows up without installing
+it. The login lasts a few hours; when it lapses meter runs `grok models` once,
+which makes the CLI renew its own file, and reads it again. Meter never writes
+that file.
 
 `other` is special: it has no fetcher. It collects spend from pi and opencode
 messages whose provider is not mapped to a row, and it hides itself while the

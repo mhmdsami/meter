@@ -67,21 +67,69 @@ enum Grok {
     }
 
     static func fetch(_ instance: ProviderInstance) async throws -> InstanceReading {
-        let login = try login()
-        if let expiry = login.expiresAt, expiry <= Date() {
-            throw ProviderError.badResponse("Grok login expired — run `grok` to refresh it")
+        var login = try login()
+        if isExpired(login) {
+            login = try refreshed(instance, login)
         }
-        let response: HTTPResponse
         do {
-            response = try await HTTP.request(billingURL, headers: [
-                "Authorization": "Bearer \(login.token)",
-                "x-xai-token-auth": "xai-grok-cli",
-                "accept": "application/json",
-            ])
+            return try await reading(login, instance: instance)
         } catch ProviderError.http(let status, _) where status == 401 || status == 403 {
-            throw ProviderError.badResponse("Grok login rejected — run `grok` to refresh it")
+            // a rejected token can still look unexpired; let the CLI rotate it once
+            let rotated = try refreshed(instance, login)
+            return try await reading(rotated, instance: instance)
         }
+    }
+
+    private static func reading(_ login: Login, instance: ProviderInstance) async throws -> InstanceReading {
+        let response = try await HTTP.request(billingURL, headers: [
+            "Authorization": "Bearer \(login.token)",
+            "x-xai-token-auth": "xai-grok-cli",
+            "accept": "application/json",
+        ])
         return try parse(response.data, instance: instance)
+    }
+
+    private static func isExpired(_ login: Login) -> Bool {
+        guard let expiry = login.expiresAt else { return false }
+        return expiry <= Date()
+    }
+
+    /// Meter never writes the CLI's login. When it has gone stale the CLI is run
+    /// once to renew its own file, then the token is read again. `models` asks
+    /// for a listing, not inference, so it costs no pool usage.
+    private static func refreshed(_ instance: ProviderInstance, _ previous: Login) throws -> Login {
+        guard let binary = binary(instance) else {
+            throw ProviderError.missingKey("Grok login expired and the `grok` binary was not found")
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: binary)
+        process.arguments = ["models"]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try? process.run()
+        let deadline = Date().addingTimeInterval(20)
+        while process.isRunning && Date() < deadline {
+            usleep(200_000)
+        }
+        if process.isRunning { process.terminate() }
+
+        let login = try login()
+        guard login.token != previous.token || !isExpired(login) else {
+            throw ProviderError.badResponse("Grok login expired — run `grok login`")
+        }
+        return login
+    }
+
+    static func binary(_ instance: ProviderInstance) -> String? {
+        if let configured = instance.options?["bin"], !configured.isEmpty {
+            return configured
+        }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        for path in ["\(home)/.grok/bin/grok", "/opt/homebrew/bin/grok", "/usr/local/bin/grok"]
+        where FileManager.default.isExecutableFile(atPath: path) {
+            return path
+        }
+        return nil
     }
 
     static func parse(_ data: Data, instance: ProviderInstance) throws -> InstanceReading {
