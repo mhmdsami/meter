@@ -13,9 +13,15 @@ like; every instance gets its own row.
 | `amp` | free-tier meter, subscription pools, credit balance, today's recorded cost | `amp` CLI login or API key |
 | `zed` | edit-prediction usage, billing cycle | Zed's keychain login |
 | `vercel` | paid AI Gateway spend from the `fx` log | `~/.fx/usage.jsonl` |
+| `grok` | weekly shared pool for Grok, Grok Bot, and Cursor, plus prepaid credit | the Grok CLI login in `~/.grok/auth.json` |
 | `straitly` | key balance (`/v1/key`) | API key |
 | `cloudflare` | requests, tokens, errors, billed cost, credit balance | API token plus account/gateway ids |
 | `other` | catch-all for providers without a dedicated row | none |
+
+`grok` reads the same billing call the official Grok CLI makes for `/usage`.
+The X Subscription shares one weekly pool across Grok, Grok Bot, and Cursor,
+so the row is the whole subscription, not one product. The CLI refreshes its
+token on its next run; when it expires meter says so instead of guessing.
 
 `other` is special: it has no fetcher. It collects spend from pi and opencode
 messages whose provider is not mapped to a row, and it hides itself while the

@@ -25,6 +25,7 @@ enum Providers {
         "zed": Zed.fetch,
         "vercel": VercelGateway.fetch,
         "antigravity": Antigravity.fetch,
+        "grok": Grok.fetch,
         "amp": Amp.fetch,
         "cloudflare": Cloudflare.fetch,
         "straitly": Straitly.fetch,

@@ -147,6 +147,37 @@ final class ProviderParsingTests: XCTestCase {
         XCTAssertThrowsError(try Claude.loadCredentials(configDir: dir))
     }
 
+    func testGrokUnifiedPool() throws {
+        let json = """
+        {"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","end":"2026-11-11T09:49:25.402+00:00"},
+        "creditUsagePercent":18.0,
+        "productUsage":[{"product":"Cursor","usagePercent":14.0},{"product":"GrokBot","usagePercent":4.0}],
+        "isUnifiedBillingUser":true,"prepaidBalance":{"val":250},
+        "billingPeriodEnd":"2026-11-11T09:49:25.402+00:00"}}
+        """
+        let reading = try Grok.parse(Data(json.utf8),
+                                     instance: ProviderInstance(type: "grok", name: "Grok"))
+        XCTAssertEqual(reading.windows.count, 1)
+        XCTAssertEqual(reading.windows[0].usedPercent, 18)
+        XCTAssertEqual(reading.balanceNote, "$2.50 credit")
+        XCTAssertNotNil(reading.windows[0].resetsAt)
+    }
+
+    func testGrokWithoutCreditHidesBalance() throws {
+        let json = """
+        {"config":{"creditUsagePercent":0,"prepaidBalance":{"val":0}}}
+        """
+        let reading = try Grok.parse(Data(json.utf8),
+                                     instance: ProviderInstance(type: "grok", name: "Grok"))
+        XCTAssertNil(reading.balanceNote)
+        XCTAssertEqual(reading.windows[0].usedPercent, 0)
+    }
+
+    func testGrokRejectsUnexpectedJSON() {
+        XCTAssertThrowsError(try Grok.parse(Data("{}".utf8),
+                                            instance: ProviderInstance(type: "grok", name: "Grok")))
+    }
+
     func testHistoryLines() {
         let daily = ["claude": Array(repeating: 10.0, count: 30).enumerated().map { Double($0.offset) + 1 },
                      "codex": [2, 0, 4, 0, 0, 0, 1] + Array(repeating: 0.0, count: 23).map { $0 }]
