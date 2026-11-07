@@ -90,17 +90,17 @@ The old local ledger can be imported once with
 ## Gates and deploy
 
 `npm install` at the repo root installs biome and lefthook and wires the git
-hooks: pre-commit lints staged JS/TS/JSON, pre-push runs the full gate.
+hooks: pre-commit runs the full gate.
 
 ```sh
-npm run gate     # biome + tsc + next build, swift build + test, cargo fmt/clippy/test
+npm run gate     # biome + tsc, swift test, cargo fmt/clippy/test, npm audit
 SMOKE_URL=https://<deployment> npm run smoke   # health, login, 401s, /preview is prod-only
 ```
 
-`.github/workflows/ci.yml` runs the same legs on PRs. Pushes to `main` deploy
-through `.github/workflows/deploy.yml` (typecheck, D1 migrations,
+Pushes to `main` deploy through `.github/workflows/deploy.yml` (D1 migrations,
 `opennextjs-cloudflare deploy`, smoke). It needs the `CLOUDFLARE_API_TOKEN`
-secret and the `CLOUDFLARE_ACCOUNT_ID` variable.
+secret and the `CLOUDFLARE_ACCOUNT_ID` variable. A manual-only
+`.github/workflows/ci.yml` runs the same gate on demand.
 
 ## Docs
 

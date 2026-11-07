@@ -22,8 +22,8 @@ cd dashboard && npm run dev                            # dashboard + D1 locally
 cd dashboard && npm run db:migrate                     # apply D1 migrations
 ```
 
-`npm run gate` is what pre-push and CI run. The collector leg skips itself
-when cargo is not installed; CI has the toolchain, this Mac may not.
+`npm run gate` is what the pre-commit hook runs. The collector leg skips itself
+when cargo is not installed; this Mac may not have it.
 `npm run smoke` needs `SMOKE_URL` (the deployment or `http://localhost:3000`).
 
 `--print` is the fastest way to exercise every enabled provider against
@@ -32,18 +32,18 @@ than unit tests; treat parser tests as the source of truth.
 
 ## Gates
 
-`lefthook.yml` wires two hooks: pre-commit runs `biome check` on staged
-JS/TS/JSON, pre-push runs `npm run gate`. Hooks come from `npm install` at the
-repo root; never `--no-verify` around them, fix the gate instead.
+`lefthook.yml` wires one hook: pre-commit runs `npm run gate`. Hooks come from
+`npm install` at the repo root; never `--no-verify` around them, fix the gate
+instead. A manual-only `.github/workflows/ci.yml` runs the same legs on demand.
 
-- **dashboard**: `biome check`, `tsc --noEmit`, `next build`.
-- **menubar**: `swift build`, `swift test`.
+- **dashboard**: `biome check`, `tsc --noEmit`.
+- **menubar**: `swift test`.
 - **collector**: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`.
 
-`.github/workflows/ci.yml` runs the same three legs on every PR and push.
 `.github/workflows/deploy.yml` ships to Cloudflare on pushes to `main`:
-typecheck, D1 migrations, `opennextjs-cloudflare deploy`, then `npm run smoke`.
-It needs `CLOUDFLARE_API_TOKEN` (secret) and `CLOUDFLARE_ACCOUNT_ID`
+D1 migrations, `opennextjs-cloudflare deploy` (which builds), then
+`npm run smoke`. It needs `CLOUDFLARE_API_TOKEN` (secret) and
+`CLOUDFLARE_ACCOUNT_ID`
 (variable). Deploys to the dashboard are not run by hand.
 
 ## Layout
