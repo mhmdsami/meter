@@ -4,6 +4,7 @@ use crate::scan::Row;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::Command;
 use time::format_description::well_known::Rfc3339;
@@ -139,12 +140,13 @@ struct TranscriptLine {
 }
 
 fn turns(path: &Path) -> Vec<Turn> {
-    let Ok(text) = fs::read_to_string(path) else {
+    let Ok(handle) = fs::File::open(path) else {
         return Vec::new();
     };
     let mut out = Vec::new();
-    for line in text.lines() {
-        let Ok(obj) = serde_json::from_str::<TranscriptLine>(line) else {
+    for line in BufReader::new(handle).lines() {
+        let Ok(line) = line else { continue };
+        let Ok(obj) = serde_json::from_str::<TranscriptLine>(&line) else {
             continue;
         };
         if obj.kind.as_deref() != Some("PLANNER_RESPONSE") {

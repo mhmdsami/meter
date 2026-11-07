@@ -2,6 +2,7 @@ use crate::pricing::Pricing;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use time::format_description::well_known::Rfc3339;
@@ -199,11 +200,12 @@ pub fn pi(host: &str, roots: &[PathBuf], since_ms: i64, pricing: &Pricing) -> Ve
     }
     let mut best: HashMap<String, PiMsg> = HashMap::new();
     for (file_idx, file) in files.iter().enumerate() {
-        let Ok(text) = fs::read_to_string(file) else {
+        let Ok(handle) = fs::File::open(file) else {
             continue;
         };
-        for (line_idx, line) in text.lines().enumerate() {
-            let Ok(obj) = serde_json::from_str::<PiLine>(line) else {
+        for (line_idx, line) in BufReader::new(handle).lines().enumerate() {
+            let Ok(line) = line else { continue };
+            let Ok(obj) = serde_json::from_str::<PiLine>(&line) else {
                 continue;
             };
             if obj.kind.as_deref() != Some("message") {
@@ -360,11 +362,12 @@ pub fn claude(host: &str, roots: &[PathBuf], since_ms: i64, pricing: &Pricing) -
     }
     let mut best: HashMap<String, ClaudeMsg> = HashMap::new();
     for file in files {
-        let Ok(text) = fs::read_to_string(&file) else {
+        let Ok(handle) = fs::File::open(&file) else {
             continue;
         };
-        for line in text.lines() {
-            let Ok(obj) = serde_json::from_str::<ClaudeLine>(line) else {
+        for line in BufReader::new(handle).lines() {
+            let Ok(line) = line else { continue };
+            let Ok(obj) = serde_json::from_str::<ClaudeLine>(&line) else {
                 continue;
             };
             if obj.kind.as_deref() != Some("assistant") {

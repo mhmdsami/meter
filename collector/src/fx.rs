@@ -3,6 +3,7 @@ use crate::scan::Row;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use time::OffsetDateTime;
 use time::UtcOffset;
@@ -36,12 +37,13 @@ struct Generation {
 
 /// `pending` and final lines share an id, so keep the most complete one.
 fn generations(path: &Path) -> Vec<Generation> {
-    let Ok(text) = fs::read_to_string(path) else {
+    let Ok(handle) = fs::File::open(path) else {
         return Vec::new();
     };
     let mut best: HashMap<String, Generation> = HashMap::new();
-    for line in text.lines() {
-        let Ok(obj) = serde_json::from_str::<Line>(line) else {
+    for line in BufReader::new(handle).lines() {
+        let Ok(line) = line else { continue };
+        let Ok(obj) = serde_json::from_str::<Line>(&line) else {
             continue;
         };
         if obj.kind.as_deref() != Some("generation") {

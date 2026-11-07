@@ -2,6 +2,7 @@ use crate::pricing::Pricing;
 use crate::scan::Row;
 use serde::Deserialize;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use time::format_description::well_known::Rfc3339;
 use time::{OffsetDateTime, UtcOffset};
@@ -90,15 +91,16 @@ pub fn scan(
 }
 
 fn file_rows(host: &str, path: &Path, since_day: &str, pricing: &Pricing) -> Vec<Row> {
-    let Ok(text) = fs::read_to_string(path) else {
+    let Ok(handle) = fs::File::open(path) else {
         return Vec::new();
     };
     let mut events: Vec<Event> = Vec::new();
     let mut project = String::new();
     let mut current_model = String::new();
 
-    for line in text.lines() {
-        let Ok(obj) = serde_json::from_str::<Line>(line) else {
+    for line in BufReader::new(handle).lines() {
+        let Ok(line) = line else { continue };
+        let Ok(obj) = serde_json::from_str::<Line>(&line) else {
             continue;
         };
         match obj.kind.as_deref() {

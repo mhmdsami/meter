@@ -29,8 +29,10 @@ enum Antigravity {
 
     private static let warmLock = NSLock()
     private static var warm: (probe: Probe, lastUsed: Date)?
-    /// Longer than the refresh interval so the session is reused, not churned.
-    private static let warmIdle: TimeInterval = 600
+    /// agy holds ~180 MB while it runs, so it is reaped shortly after a fetch
+    /// instead of being kept alive forever. A cold start costs ~12 s.
+    private static let warmIdle: TimeInterval = 120
+    private static var idleTask: DispatchWorkItem?
 
     private static func warmProbe() -> Probe? {
         warmLock.lock(); defer { warmLock.unlock() }
@@ -63,7 +65,7 @@ enum Antigravity {
         warmLock.unlock()
         if let previous, previous.pid != probe.pid { killProbe(previous) }
         Task.detached {
-            try? await Task.sleep(nanoseconds: 300_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64((warmIdle + 5) * 1_000_000_000))
             reapIdle(probe)
         }
     }

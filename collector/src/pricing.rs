@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -32,13 +32,38 @@ const OFFICIAL: &[&str] = &[
     "mistral",
 ];
 
-fn parse_cost(v: &Value) -> Cost {
-    let n = |key: &str| v.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+/// Only the fields meter prices with; the file carries far more, and a typed
+/// parse keeps the whole table from becoming a JSON tree in memory.
+#[derive(Deserialize)]
+struct Root {
+    #[serde(flatten)]
+    providers: std::collections::HashMap<String, Provider>,
+}
+
+#[derive(Deserialize)]
+struct Provider {
+    models: Option<std::collections::HashMap<String, Model>>,
+}
+
+#[derive(Deserialize)]
+struct Model {
+    cost: Option<CostJson>,
+}
+
+#[derive(Deserialize)]
+struct CostJson {
+    input: Option<f64>,
+    output: Option<f64>,
+    cache_read: Option<f64>,
+    cache_write: Option<f64>,
+}
+
+fn parse_cost(cost: &CostJson) -> Cost {
     Cost {
-        input: n("input"),
-        output: n("output"),
-        cache_read: n("cache_read"),
-        cache_write: n("cache_write"),
+        input: cost.input.unwrap_or(0.0),
+        output: cost.output.unwrap_or(0.0),
+        cache_read: cost.cache_read.unwrap_or(0.0),
+        cache_write: cost.cache_write.unwrap_or(0.0),
     }
 }
 
@@ -54,31 +79,39 @@ fn beats(candidate: Cost, candidate_official: bool, existing: (bool, Cost)) -> b
 impl Pricing {
     pub fn load(cache: &Path) -> Pricing {
         refresh(cache);
-        let text = fs::read_to_string(cache).unwrap_or_default();
-        let root: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        let Ok(bytes) = fs::read(cache) else {
+            return Pricing {
+                models: HashMap::new(),
+                by_provider: HashMap::new(),
+            };
+        };
+        let Ok(root) = serde_json::from_slice::<Root>(&bytes) else {
+            return Pricing {
+                models: HashMap::new(),
+                by_provider: HashMap::new(),
+            };
+        };
         let mut models: HashMap<String, (bool, Cost)> = HashMap::new();
         let mut by_provider: HashMap<String, HashMap<String, Cost>> = HashMap::new();
-        if let Value::Object(providers) = &root {
-            for (provider, body) in providers {
-                let Some(model_map) = body.get("models").and_then(Value::as_object) else {
+        for (provider, body) in &root.providers {
+            let Some(model_map) = body.models.as_ref() else {
+                continue;
+            };
+            let official = OFFICIAL.contains(&provider.as_str());
+            let entry = by_provider.entry(provider.to_lowercase()).or_default();
+            for (id, model) in model_map {
+                let Some(cost) = model.cost.as_ref() else {
                     continue;
                 };
-                let official = OFFICIAL.contains(&provider.as_str());
-                let entry = by_provider.entry(provider.to_lowercase()).or_default();
-                for (id, model) in model_map {
-                    let Some(cost) = model.get("cost") else {
+                let parsed = parse_cost(cost);
+                let key = id.to_lowercase();
+                entry.insert(key.clone(), parsed);
+                if let Some(existing) = models.get(&key).copied() {
+                    if !beats(parsed, official, existing) {
                         continue;
-                    };
-                    let parsed = parse_cost(cost);
-                    let key = id.to_lowercase();
-                    entry.insert(key.clone(), parsed);
-                    if let Some(existing) = models.get(&key).copied() {
-                        if !beats(parsed, official, existing) {
-                            continue;
-                        }
                     }
-                    models.insert(key, (official, parsed));
                 }
+                models.insert(key, (official, parsed));
             }
         }
         Pricing {
