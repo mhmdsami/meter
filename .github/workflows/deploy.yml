@@ -1,10 +1,13 @@
 name: Deploy
 
 on:
-  workflow_run:
-    workflows: [ci]
-    types: [completed]
+  push:
     branches: [main]
+    paths:
+      - "dashboard/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 concurrency:
@@ -16,16 +19,17 @@ defaults:
     working-directory: dashboard
 
 jobs:
+  gate:
+    uses: ./.github/workflows/ci.yml
+
   deploy:
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    needs: gate
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-node@v7
         with:
