@@ -15,14 +15,12 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     <main className="relative flex min-h-dvh items-center justify-center overflow-hidden p-6">
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-40 left-1/2 size-[520px] -translate-x-1/2 rounded-full opacity-30 blur-3xl"
-        style={{ background: "radial-gradient(circle, var(--primary), transparent 65%)" }}
+        className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(60%_100%_at_50%_0%,color-mix(in_oklch,var(--primary)_12%,transparent),transparent)]"
       />
       <div className="animate-fade-up relative w-full max-w-sm rounded-lg border border-border bg-card p-8 shadow-[var(--shadow-card)]">
         <h1 className="font-display text-2xl tracking-tight">meter</h1>
         <p className="mt-1 text-xs text-text-tertiary">AI usage across machines</p>
         <h2 className="mt-7 text-base font-medium">Sign in</h2>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">Access is limited to approved accounts.</p>
         <div className="mt-6">
           {googleConfigured() ? (
             <GoogleSignIn next={next} />
