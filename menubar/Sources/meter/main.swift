@@ -14,7 +14,9 @@ let lockPath = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent(".cache/meter/app.lock")
 try? FileManager.default.createDirectory(at: lockPath.deletingLastPathComponent(),
                                          withIntermediateDirectories: true)
-let lockFD = open(lockPath.path, O_CREAT | O_RDWR, 0o600)
+// O_CLOEXEC matters: agy and other helpers are exec'd children, and an
+// inherited descriptor would keep the flock held after meter exits.
+let lockFD = open(lockPath.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
 if lockFD < 0 || flock(lockFD, LOCK_EX | LOCK_NB) != 0 {
     exit(0)
 }
