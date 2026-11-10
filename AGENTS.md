@@ -60,7 +60,6 @@ menubar/
     Reading.swift      InstanceReading / UsageWindow models, aggregation
     Providers.swift    registry: type string -> fetcher, fan-out, summary spend
     Summary.swift      /api/summary client, daily buckets, offline cache
-    Notifier.swift     threshold alerts (pure decision + UNUserNotificationCenter)
     SQLite.swift       thin readonly libsqlite3 wrapper (credential store)
     PrintMode.swift    --print / --json one-shot modes
     MenuView.swift     dropdown rows, bars, countdowns

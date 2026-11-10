@@ -203,8 +203,6 @@ final class Store: ObservableObject {
             readings, enabled: config.providers.filter(\.enabled),
             today: latestSummary?.todayByProvider ?? [:])
 
-        Notifier.check(readings: readings, todayTotal: totalToday, settings: config.notifications)
-
         let names = Set(config.providers.map(\.name))
         lastFetch = lastFetch.filter { names.contains($0.key) }
         lastRefresh = Date()

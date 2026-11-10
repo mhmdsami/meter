@@ -29,7 +29,6 @@ menubar/
   Reading.swift      InstanceReading and UsageWindow
   Providers.swift    registry, fan-out, summary spend attachment
   Summary.swift      work summary client and cache
-  Notifier.swift     threshold alerts
   SQLite.swift       small read-only SQLite wrapper
   PrintMode.swift    --print / --json
   MenuView.swift     dropdown rows and bars

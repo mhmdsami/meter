@@ -43,7 +43,6 @@ Claude Code or Zed; choose **Always Allow**.
 ```sh
 meter --print        # one refresh, table to stdout
 meter --json         # the same data as JSON
-meter --test-notify  # ask for notification permission and send a test
 ```
 
 The **Dashboard** button in the menu opens the hosted dashboard.

@@ -126,18 +126,6 @@ header from any request to `opencode.ai` in your browser's developer tools.
 When the cookie expires the balance disappears quietly; the usage windows keep
 working from the API key.
 
-## Notifications
-
-```json
-{
-  "notifications": { "enabled": true, "window_percent": 90, "daily_spend": 50 }
-}
-```
-
-`window_percent` fires once per window cycle when usage crosses it.
-`daily_spend` fires once per day when estimated spend exceeds it; omit it to
-disable spend alerts. See [install.md](install.md) for the macOS permission.
-
 ## Rate limits
 
 A `429` from any provider arms an automatic backoff that honors `Retry-After`
