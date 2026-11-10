@@ -22,8 +22,7 @@ enum PrintMode {
             }
             var readings = await Providers.fetchAll(config.providers)
             readings = Providers.attachSpend(readings, enabled: enabled,
-                                             today: summary?.todayByProvider ?? [:],
-                                             preferred: Store.preferredInstances(config))
+                                             today: summary?.todayByProvider ?? [:])
             let history = summary.map {
                 Store.historyLines(SummaryClient.dailyByProvider($0, days: 30))
             } ?? []

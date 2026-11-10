@@ -63,19 +63,16 @@ enum Providers {
         return readings
     }
 
-    /// The summary reports spend per provider type, not per account or key. When a
-    /// type has exactly one instance the total belongs to it; with several
-    /// instances the split is unknowable, so those rows show limits only and the
-    /// spend stays in the day total.
+    /// The summary reports spend per provider type, not per account or key. It
+    /// always lands on the first instance of that type; extra instances show
+    /// limits only.
     static func attachSpend(_ readings: [InstanceReading], enabled: [ProviderInstance],
-                            today: [String: Double], preferred: [String: String] = [:]) -> [InstanceReading] {
+                            today: [String: Double]) -> [InstanceReading] {
         var out = readings
         for i in out.indices { out[i].spendToday = nil }
         for (type, value) in today where value > 0.004 {
-            let ofType = enabled.filter { $0.type == type }
-            let chosen = preferred[type].flatMap { wanted in ofType.first { $0.name == wanted }?.name }
-                ?? ofType.first?.name
-            guard let name = chosen, let index = out.firstIndex(where: { $0.name == name }) else { continue }
+            guard let name = enabled.first(where: { $0.type == type })?.name,
+                  let index = out.firstIndex(where: { $0.name == name }) else { continue }
             out[index].spendToday = value
         }
         return hideEmpty(out)

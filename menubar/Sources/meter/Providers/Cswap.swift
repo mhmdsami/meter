@@ -79,13 +79,6 @@ enum Cswap {
         }
     }
 
-    /// Account cswap currently has live. Provider-wide spend cannot be split
-    /// per account, so it is shown on this row.
-    static func activeEmail() -> String? {
-        guard let listing = try? listing() else { return nil }
-        return listing.accounts.first { $0.active }?.email
-    }
-
     /// `account` matches the email or the slot number shown by `cswap list`.
     static func reading(_ instance: ProviderInstance, account selector: String) throws -> InstanceReading {
         let listing = try listing(instance)

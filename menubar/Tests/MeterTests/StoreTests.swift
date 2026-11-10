@@ -62,7 +62,7 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(out.filter { $0.type == "opencode" }.compactMap(\.spendToday).count, 1)
     }
 
-    func testPreferredInstanceClaimsTheTotal() {
+    func testFirstInstanceAlwaysClaimsTheTotal() {
         let enabled = [
             ProviderInstance(type: "opencode", name: "OpenCode a"),
             ProviderInstance(type: "opencode", name: "OpenCode b"),
@@ -71,10 +71,9 @@ final class StoreTests: XCTestCase {
             InstanceReading(id: $0.name, type: $0.type, name: $0.name,
                             windows: [UsageWindow(id: "w", label: "W", usedPercent: 1)])
         }
-        let out = Providers.attachSpend(readings, enabled: enabled, today: ["opencode": 4],
-                                        preferred: ["opencode": "OpenCode b"])
-        XCTAssertNil(out.first { $0.name == "OpenCode a" }?.spendToday)
-        XCTAssertEqual(out.first { $0.name == "OpenCode b" }?.spendToday ?? -1, 4, accuracy: 0.0001)
+        let out = Providers.attachSpend(readings, enabled: enabled, today: ["opencode": 4])
+        XCTAssertEqual(out.first { $0.name == "OpenCode a" }?.spendToday ?? -1, 4, accuracy: 0.0001)
+        XCTAssertNil(out.first { $0.name == "OpenCode b" }?.spendToday)
     }
 
     func testAttachSpendClearsStaleValues() {

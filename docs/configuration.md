@@ -114,9 +114,9 @@ alias claude-personal='CLAUDE_CONFIG_DIR=~/.claude-personal claude'
 Omit both options for the default `~/.claude` login. macOS keys the keychain
 item to the directory, so the two accounts do not share a token.
 
-Spend is reported per provider, not per account. A provider with more than one
-instance shows limits only on those rows; the day total still includes all of
-it.
+Spend is reported per provider, not per account. When a provider has more than
+one instance the total sits on the first one, whatever account is currently
+billing; the other rows show limits only.
 
 ## OpenCode cookies
 

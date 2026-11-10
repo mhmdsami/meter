@@ -201,35 +201,13 @@ final class Store: ObservableObject {
         }
         readings = Providers.attachSpend(
             readings, enabled: config.providers.filter(\.enabled),
-            today: latestSummary?.todayByProvider ?? [:],
-            preferred: Self.preferredInstances(config))
+            today: latestSummary?.todayByProvider ?? [:])
 
         let names = Set(config.providers.map(\.name))
         lastFetch = lastFetch.filter { names.contains($0.key) }
         lastRefresh = Date()
         let snapshot = readings
         Task.detached { Self.persist(snapshot) }
-    }
-
-    /// The summary reports spend per provider, not per account. When a provider
-    /// has several instances, the total goes to the one currently paying: the
-    /// account cswap has live for Claude, the opencode credential store for
-    /// OpenCode. Anything else keeps the single-instance rule.
-    nonisolated static func preferredInstances(_ config: Config) -> [String: String] {
-        var out: [String: String] = [:]
-        if let active = Cswap.activeEmail()?.lowercased(), !active.isEmpty,
-           let match = config.providers.first(where: {
-               $0.type == "claude" && $0.options?["cswap_account"]?.lowercased() == active
-           }) {
-            out["claude"] = match.name
-        }
-        if let key = OpenCode.activeAccountKey(),
-           let match = config.providers.first(where: {
-               $0.type == "opencode" && (try? Secrets.apiKey(for: $0)) == key
-           }) {
-            out["opencode"] = match.name
-        }
-        return out
     }
 
     /// Which instances should fetch right now: force bypasses intervals but never
