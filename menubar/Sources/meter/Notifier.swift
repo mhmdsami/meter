@@ -90,16 +90,45 @@ enum Notifier {
     }
 
     /// One-shot `meter --test-notify`, so authorization can be granted on demand.
+    /// Prints what macOS reports, because a silent failure here is indistinguishable
+    /// from a threshold that never fired.
     static func sendTest() {
         let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+        func report(_ status: UNAuthorizationStatus, _ granted: Bool, _ error: Error?) {
+            if let error { print("request failed: \(error.localizedDescription)") }
+            let name = switch status {
+            case .notDetermined: "not determined"
+            case .denied: "denied"
+            case .authorized: "authorized"
+            case .provisional: "provisional"
+            case .ephemeral: "ephemeral"
+            @unknown default: "unknown"
+            }
+            print("authorization: \(name)")
+            guard granted else {
+                print("enable meter in System Settings → Notifications, then run this again")
+                exit(1)
+            }
             let content = UNMutableNotificationContent()
-            content.title = granted ? "meter notifications are on" : "meter notifications were denied"
-            content.body = granted ? "You'll hear about quota crossings and spend thresholds."
-                                   : "Enable them in System Settings → Notifications → meter."
+            content.title = "meter notifications are on"
+            content.body = "You'll hear about quota crossings and spend thresholds."
             center.add(UNNotificationRequest(identifier: "meter-test-\(UUID().uuidString)",
-                                             content: content, trigger: nil))
-            exit(0)
+                                             content: content, trigger: nil)) { error in
+                if let error { print("post failed: \(error.localizedDescription)") }
+                else { print("test notification sent") }
+                exit(error == nil ? 0 : 1)
+            }
+        }
+        center.getNotificationSettings { settings in
+            if settings.authorizationStatus == .notDetermined {
+                center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+                    report(settings.authorizationStatus, granted, error)
+                }
+            } else {
+                report(settings.authorizationStatus,
+                       settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional,
+                       nil)
+            }
         }
     }
 
