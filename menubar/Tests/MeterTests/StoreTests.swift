@@ -43,6 +43,40 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(out.first { $0.name == "Codex" }?.spendToday ?? -1, 3, accuracy: 0.0001)
     }
 
+    func testEveryProvidersSpendLandsOnSomeRow() {
+        let enabled = [
+            ProviderInstance(type: "claude", name: "Claude a"),
+            ProviderInstance(type: "claude", name: "Claude b"),
+            ProviderInstance(type: "opencode", name: "OpenCode a"),
+            ProviderInstance(type: "opencode", name: "OpenCode b"),
+            ProviderInstance(type: "codex", name: "Codex"),
+        ]
+        let readings = enabled.map {
+            InstanceReading(id: $0.name, type: $0.type, name: $0.name,
+                            windows: [UsageWindow(id: "w", label: "W", usedPercent: 1)])
+        }
+        let today = ["claude": 5.0, "opencode": 1.0, "codex": 2.0]
+        let out = Providers.attachSpend(readings, enabled: enabled, today: today)
+        XCTAssertEqual(out.compactMap(\.spendToday).reduce(0, +), 8.0, accuracy: 0.0001)
+        XCTAssertEqual(out.filter { $0.type == "claude" }.compactMap(\.spendToday).count, 1)
+        XCTAssertEqual(out.filter { $0.type == "opencode" }.compactMap(\.spendToday).count, 1)
+    }
+
+    func testPreferredInstanceClaimsTheTotal() {
+        let enabled = [
+            ProviderInstance(type: "opencode", name: "OpenCode a"),
+            ProviderInstance(type: "opencode", name: "OpenCode b"),
+        ]
+        let readings = enabled.map {
+            InstanceReading(id: $0.name, type: $0.type, name: $0.name,
+                            windows: [UsageWindow(id: "w", label: "W", usedPercent: 1)])
+        }
+        let out = Providers.attachSpend(readings, enabled: enabled, today: ["opencode": 4],
+                                        preferred: ["opencode": "OpenCode b"])
+        XCTAssertNil(out.first { $0.name == "OpenCode a" }?.spendToday)
+        XCTAssertEqual(out.first { $0.name == "OpenCode b" }?.spendToday ?? -1, 4, accuracy: 0.0001)
+    }
+
     func testAttachSpendClearsStaleValues() {
         let reading = InstanceReading(id: "Claude", type: "claude", name: "Claude", spendToday: 4)
         let out = Providers.attachSpend([reading], enabled: [ProviderInstance(type: "claude", name: "Claude")],
