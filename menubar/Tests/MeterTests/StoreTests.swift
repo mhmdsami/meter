@@ -24,7 +24,7 @@ final class StoreTests: XCTestCase {
         XCTAssertTrue(Store.historyLines(["anthropic": series([])]).isEmpty)
     }
 
-    func testAttachSpendSkipsTypesWithSeveralInstances() {
+    func testAttachSpendFallsBackToTheFirstInstance() {
         let enabled = [
             ProviderInstance(type: "claude", name: "Claude work"),
             ProviderInstance(type: "claude", name: "Claude personal"),
@@ -37,8 +37,8 @@ final class StoreTests: XCTestCase {
         ]
         let out = Providers.attachSpend(readings, enabled: enabled,
                                         today: ["claude": 12.5, "codex": 3])
-        // the per-account split is unknowable, so Claude rows show limits only
-        XCTAssertNil(out.first { $0.name == "Claude work" })
+        // the split is unknowable, so the total lands on the first instance
+        XCTAssertEqual(out.first { $0.name == "Claude work" }?.spendToday ?? -1, 12.5, accuracy: 0.0001)
         XCTAssertNil(out.first { $0.name == "Claude personal" })
         XCTAssertEqual(out.first { $0.name == "Codex" }?.spendToday ?? -1, 3, accuracy: 0.0001)
     }

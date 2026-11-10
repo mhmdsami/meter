@@ -74,7 +74,7 @@ enum Providers {
         for (type, value) in today where value > 0.004 {
             let ofType = enabled.filter { $0.type == type }
             let chosen = preferred[type].flatMap { wanted in ofType.first { $0.name == wanted }?.name }
-                ?? (ofType.count == 1 ? ofType.first?.name : nil)
+                ?? ofType.first?.name
             guard let name = chosen, let index = out.firstIndex(where: { $0.name == name }) else { continue }
             out[index].spendToday = value
         }
