@@ -108,7 +108,7 @@ if [ -x "$HOME/.local/bin/meter-collector" ]; then
     <key>ProgramArguments</key>
     <array><string>$HOME/.local/bin/meter-collector</string></array>
     <key>RunAtLoad</key><true/>
-    <key>StartInterval</key><integer>600</integer>
+    <key>StartInterval</key><integer>1800</integer>
     <key>ProcessType</key><string>Background</string>
     <key>StandardErrorPath</key><string>$HOME/.cache/meter/collector.log</string>
 </dict>

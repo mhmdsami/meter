@@ -24,8 +24,15 @@ double counting.
 ```sh
 cargo build --release
 ./target/release/meter-collector --dry-run   # print rows, no push
-./target/release/meter-collector
+./target/release/meter-collector             # push changed days
+./target/release/meter-collector --full      # push the whole window
 ```
+
+A scan covers `METER_DAYS`, but only days whose rows changed are pushed. Each
+day's content is hashed into `~/.cache/meter/collector-state.json`, and one
+full push a day reconciles pruned logs. Ingest replaces whole
+`(host, day, provider)` groups, and D1's free tier meters rows written, so
+re-sending an unchanged 30-day window every few minutes would exhaust it.
 
 ## Sources
 

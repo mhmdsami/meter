@@ -7,8 +7,9 @@ mod scan;
 
 use pricing::Pricing;
 use scan::Row;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::Command;
 use time::OffsetDateTime;
@@ -18,6 +19,56 @@ struct Config {
     token: String,
     host: String,
     days: i64,
+}
+
+/// D1's free tier meters rows written, and ingest replaces a whole
+/// (day, provider) group. Sending an unchanged window every run burns the
+/// budget for nothing, so each day's content is hashed and only changed days
+/// are pushed; one full push a day still reconciles pruned or edited logs.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct PushState {
+    full_pushed_ms: i64,
+    days: BTreeMap<String, u64>,
+}
+
+fn state_path() -> PathBuf {
+    home().join(".cache/meter/collector-state.json")
+}
+
+fn load_state() -> PushState {
+    fs::read_to_string(state_path())
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn save_state(state: &PushState) {
+    let path = state_path();
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    if let Ok(text) = serde_json::to_string(state) {
+        let _ = fs::write(path, text);
+    }
+}
+
+fn row_hash(row: &Row) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    row.provider.hash(&mut hasher);
+    row.project.hash(&mut hasher);
+    row.model.hash(&mut hasher);
+    row.spent.to_bits().hash(&mut hasher);
+    row.tokens.hash(&mut hasher);
+    row.source.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Order-independent: rows with the same key come from several files and
+/// arrive in map iteration order, so a positional hash would look changed
+/// on every run.
+fn day_hash(rows: &[Row]) -> u64 {
+    rows.iter()
+        .fold(0u64, |acc, row| acc.wrapping_add(row_hash(row)))
 }
 
 fn home() -> PathBuf {
@@ -133,10 +184,53 @@ fn main() {
         ))
     });
 
+    let mut by_day: BTreeMap<String, Vec<Row>> = BTreeMap::new();
+    for row in &rows {
+        by_day.entry(row.day.clone()).or_default().push(row.clone());
+    }
+    let mut state = load_state();
+    let full_every_ms = 24 * 3_600_000;
+    let force_full = std::env::args().any(|a| a == "--full");
+    let full_due = force_full || now_ms - state.full_pushed_ms >= full_every_ms;
+    let mut selected: Vec<String> = Vec::new();
+    for (day, day_rows) in &by_day {
+        let hash = day_hash(day_rows);
+        if full_due || state.days.get(day) != Some(&hash) {
+            selected.push(day.clone());
+        }
+    }
+
+    let spend: f64 = rows.iter().map(|row| row.spent).sum();
+    let tokens: i64 = rows.iter().map(|row| row.tokens).sum();
+    println!(
+        "{}: {} rows · ${:.2} · {} tokens ({}d)",
+        config.host,
+        rows.len(),
+        spend,
+        tokens,
+        config.days
+    );
+
+    if selected.is_empty() {
+        println!("no changes since the last push");
+        return;
+    }
+    let push_rows: Vec<Row> = selected
+        .iter()
+        .flat_map(|day| by_day.get(day).cloned().unwrap_or_default())
+        .collect();
+    println!(
+        "pushing {} of {} days ({} rows{})",
+        selected.len(),
+        by_day.len(),
+        push_rows.len(),
+        if full_due { ", full" } else { "" }
+    );
+
     let payload = serde_json::json!({
         "host": config.host,
         "generated_at": OffsetDateTime::now_utc().to_string(),
-        "rows": rows,
+        "rows": push_rows,
     });
     let body = match serde_json::to_vec(&payload) {
         Ok(body) => body,
@@ -145,17 +239,6 @@ fn main() {
             std::process::exit(1);
         }
     };
-
-    let spend: f64 = rows.iter().map(|row| row.spent).sum();
-    let tokens: i64 = rows.iter().map(|row| row.tokens).sum();
-    println!(
-        "{}: {} rows · ${:.2} · {} tokens ({}d)",
-        payload["host"].as_str().unwrap_or(""),
-        rows.len(),
-        spend,
-        tokens,
-        config.days
-    );
 
     if dry_run {
         println!("{}", String::from_utf8_lossy(&body));
@@ -182,6 +265,17 @@ fn main() {
     match output {
         Ok(output) if output.status.success() => {
             println!("{}", String::from_utf8_lossy(&output.stdout).trim());
+            if full_due {
+                state.full_pushed_ms = now_ms;
+            }
+            for day in &selected {
+                if let Some(day_rows) = by_day.get(day) {
+                    state.days.insert(day.clone(), day_hash(day_rows));
+                }
+            }
+            let oldest = since_day.clone();
+            state.days.retain(|day, _| day.as_str() >= oldest.as_str());
+            save_state(&state);
         }
         Ok(output) => {
             eprintln!(
