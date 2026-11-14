@@ -101,9 +101,10 @@ fn load_config() -> Config {
     let host = get("METER_HOST").unwrap_or_else(platform::host_name);
     Config {
         url: get("METER_URL").unwrap_or_default(),
-        // macOS keeps the token in the login keychain, same slot the menubar uses.
-        token: get("METER_TOKEN")
+        // Ingest needs a write token, not the read token the menubar uses.
+        token: get("METER_INGEST_TOKEN")
             .or_else(|| platform::keychain_token("meter/collector"))
+            .or_else(|| get("METER_TOKEN"))
             .unwrap_or_default(),
         host,
         days: get("METER_DAYS").and_then(|v| v.parse().ok()).unwrap_or(30),

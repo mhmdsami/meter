@@ -33,11 +33,15 @@ struct Summary: Codable {
 enum SummaryClient {
     static let cacheInterval: TimeInterval = 5 * 60
 
+    /// Read token only: pushing is the collector's job, so the menubar never
+    /// holds a credential that can write.
     static func token() -> String? {
-        if let value = ProcessInfo.processInfo.environment["METER_TOKEN"], !value.isEmpty {
-            return value
+        for name in ["METER_READ_TOKEN", "METER_TOKEN"] {
+            if let value = ProcessInfo.processInfo.environment[name], !value.isEmpty {
+                return value
+            }
         }
-        return Keychain.generic(service: "meter/collector")
+        return Keychain.generic(service: "meter/read") ?? Keychain.generic(service: "meter/collector")
     }
 
     static func hostName(_ configured: String) -> String {

@@ -10,7 +10,7 @@ reads shell out to `python3`, HTTP uses `curl`, everything else is pure Rust.
 
 ```sh
 METER_URL=https://<worker-domain>
-METER_TOKEN=<from the Worker secrets>
+METER_INGEST_TOKEN=<from the Worker secrets>
 METER_HOST=<hostname>
 METER_DAYS=30
 ```

@@ -77,7 +77,8 @@ npm run db:migrate
 npm run deploy
 ```
 
-Secrets: `METER_TOKEN` (ingest + client bearer), `GOOGLE_CLIENT_ID` /
+Secrets: `METER_INGEST_TOKEN` (collectors, write only), `METER_READ_TOKEN`
+(menubar, read only), `GOOGLE_CLIENT_ID` /
 `GOOGLE_CLIENT_SECRET`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and
 `ALLOWED_EMAILS`. The Google client must allow
 `https://<worker-domain>/api/auth/callback/google`. See

@@ -13,11 +13,23 @@ function sameSecret(candidate: string, expected: string): boolean {
   return diff === 0;
 }
 
-export function bearerOk(request: Request): boolean {
-  const token = env().METER_TOKEN;
+function headerTokenMatches(request: Request, token: string | undefined): boolean {
   if (!token) return false;
   const header = request.headers.get("Authorization") ?? "";
   return sameSecret(header, `Bearer ${token}`);
+}
+
+/// Machines that push rows. Kept separate from read tokens so a leaked ingest
+/// token cannot pull the whole ledger out of /api/export.
+export function ingestOk(request: Request): boolean {
+  const e = env();
+  return headerTokenMatches(request, e.METER_INGEST_TOKEN ?? e.METER_TOKEN);
+}
+
+/// Machines and sessions that read aggregates.
+export function readOk(request: Request): boolean {
+  const e = env();
+  return headerTokenMatches(request, e.METER_READ_TOKEN ?? e.METER_TOKEN);
 }
 
 export async function sessionOk(request: Request): Promise<boolean> {
@@ -26,5 +38,5 @@ export async function sessionOk(request: Request): Promise<boolean> {
 }
 
 export async function authed(request: Request): Promise<boolean> {
-  return bearerOk(request) || (await sessionOk(request));
+  return readOk(request) || (await sessionOk(request));
 }

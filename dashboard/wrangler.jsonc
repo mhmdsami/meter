@@ -8,6 +8,9 @@
   "observability": { "enabled": true },
   "workers_dev": false,
   "routes": [{ "pattern": "meter.sam1.space", "custom_domain": true }],
+  "ratelimits": [
+    { "name": "INGEST_RATE", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

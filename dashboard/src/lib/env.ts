@@ -3,6 +3,9 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 export interface Env {
   DB: D1Database;
   METER_TOKEN?: string;
+  METER_INGEST_TOKEN?: string;
+  METER_READ_TOKEN?: string;
+  INGEST_RATE?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
   GOOGLE_CLIENT_ID?: string;

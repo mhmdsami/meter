@@ -1,5 +1,6 @@
-import { bearerOk } from "@/lib/access";
+import { ingestOk } from "@/lib/access";
 import { db } from "@/lib/db";
+import { env } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,14 @@ function bad(message: string) {
 }
 
 export async function POST(request: Request) {
-  if (!bearerOk(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
+  if (!ingestOk(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
+  // A leaked token should not be able to burn the D1 write quota on its own.
+  const limiter = env().INGEST_RATE;
+  if (limiter) {
+    const key = request.headers.get("cf-connecting-ip") ?? "unknown";
+    const { success } = await limiter.limit({ key });
+    if (!success) return Response.json({ error: "rate limited" }, { status: 429 });
+  }
 
   let payload: { host?: unknown; rows?: unknown };
   try {
