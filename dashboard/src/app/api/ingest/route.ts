@@ -44,6 +44,7 @@ export async function POST(request: Request) {
     const spent = Number(raw.spent ?? 0);
     const tokens = Math.trunc(Number(raw.tokens ?? 0));
     if (!Number.isFinite(spent) || !Number.isFinite(tokens)) return bad("bad number");
+    if (spent < 0 || tokens < 0) return bad("negative value");
     const project = String(raw.project ?? "").slice(0, 1024);
     const model = String(raw.model ?? "").slice(0, 256);
     const source = raw.source === "reported" ? "reported" : "estimated";

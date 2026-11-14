@@ -260,6 +260,14 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
 
   const hosts = useMemo(() => [...new Set(rows.map((row) => row.host))].sort(), [rows]);
   const providers = useMemo(() => [...new Set(rows.map((row) => row.provider))].sort(), [rows]);
+  const hostPalette = useMemo(() => {
+    const map = new Map<string, string>();
+    hosts.forEach((name, index) => {
+      map.set(name, HOST_COLORS[index % HOST_COLORS.length]);
+    });
+    return map;
+  }, [hosts]);
+
   const palette = useMemo(() => {
     const map = new Map<string, string>();
     let fallback = 0;
@@ -480,9 +488,9 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
           <Button size="xs" variant={host === "all" ? "secondary" : "ghost"} onClick={() => setHost("all")}>
             All
           </Button>
-          {hosts.map((name, index) => (
+          {hosts.map((name) => (
             <Button key={name} size="xs" variant={host === name ? "secondary" : "ghost"} onClick={() => setHost(name)}>
-              <span className="size-1.5 rounded-full" style={{ background: HOST_COLORS[index % HOST_COLORS.length] }} />
+              <span className="size-1.5 rounded-full" style={{ background: hostPalette.get(name) }} />
               {name}
             </Button>
           ))}
@@ -749,15 +757,12 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
                   <TableCell className="w-full whitespace-nowrap px-0 py-2 pr-6 text-xs tabular-nums">
                     {weekdayDay(day)}
                     <div className="mt-1 flex flex-wrap gap-1 sm:hidden">
-                      {[...entry.hosts.entries()]
-                        .sort((a, b) => b[1] - a[1])
-                        .map(([name, value], index) => (
+                      {hosts
+                        .filter((name) => (entry.hosts.get(name) ?? 0) > 0.004)
+                        .map((name) => (
                           <Badge key={name} variant="outline" className="gap-1.5 text-2xs">
-                            <span
-                              className="size-1.5 rounded-full"
-                              style={{ background: HOST_COLORS[index % HOST_COLORS.length] }}
-                            />
-                            {name} {money(value)}
+                            <span className="size-1.5 rounded-full" style={{ background: hostPalette.get(name) }} />
+                            {name} {money(entry.hosts.get(name) ?? 0)}
                           </Badge>
                         ))}
                     </div>
@@ -770,15 +775,12 @@ export default function Dashboard({ user, demoRows }: { user: User; demoRows?: R
                   </TableCell>
                   <TableCell className="hidden whitespace-nowrap py-2 pl-2 sm:table-cell">
                     <div className="flex gap-1 sm:flex-nowrap">
-                      {[...entry.hosts.entries()]
-                        .sort((a, b) => b[1] - a[1])
-                        .map(([name, value], index) => (
+                      {hosts
+                        .filter((name) => (entry.hosts.get(name) ?? 0) > 0.004)
+                        .map((name) => (
                           <Badge key={name} variant="outline" className="gap-1.5">
-                            <span
-                              className="size-1.5 rounded-full"
-                              style={{ background: HOST_COLORS[index % HOST_COLORS.length] }}
-                            />
-                            {name} {money(value)}
+                            <span className="size-1.5 rounded-full" style={{ background: hostPalette.get(name) }} />
+                            {name} {money(entry.hosts.get(name) ?? 0)}
                           </Badge>
                         ))}
                     </div>
