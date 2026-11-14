@@ -36,17 +36,17 @@ Copy `.dev.vars.example` to `.dev.vars`, fill the same values, then `npm run dev
 
 ## API
 
-- `POST /api/ingest`: `Authorization: Bearer $METER_TOKEN`, body
+- `POST /api/ingest`: `Authorization: Bearer $METER_INGEST_TOKEN`, body
   `{ "host": "server", "rows": [...] }`. Rows are summed per
   `(host, day, provider, project, model)` and each `(host, day, provider)`
   group is replaced atomically.
-- `GET /api/export?days=90&today=YYYY-MM-DD`: breakdown rows (session or bearer).
+- `GET /api/export?days=90&today=YYYY-MM-DD`: breakdown rows (session or `METER_READ_TOKEN`).
 - `GET /api/summary?days=30&today=YYYY-MM-DD&exclude_host=…`: daily aggregates
   and today totals. `exclude_host` keeps the menubar from counting its own rows.
 - `GET /api/health`.
 
-The dashboard is Google-gated; the API accepts either the better-auth session
-cookie or the bearer token (for the menubar/collector).
+The dashboard is Google-gated. Reads accept the better-auth session cookie or
+the read token; ingest accepts only the ingest token.
 
 ## Assets
 
