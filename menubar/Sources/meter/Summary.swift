@@ -70,7 +70,7 @@ enum SummaryClient {
 
     /// Every host's usage, including this one: the collector pushes it, so the
     /// app never filters itself out.
-    static func fetch(config: CollectorConfig, host: String) async -> Summary? {
+    static func fetch(config: CollectorConfig) async -> Summary? {
         guard config.enabled, !config.url.isEmpty, let base = URL(string: config.url),
               let token = token() else { return nil }
         var components = URLComponents(url: base.appendingPathComponent("api/summary"),
@@ -78,7 +78,6 @@ enum SummaryClient {
         components?.queryItems = [
             URLQueryItem(name: "days", value: "30"),
             URLQueryItem(name: "today", value: dayString(Date())),
-            URLQueryItem(name: "host", value: host),
         ]
         guard let url = components?.url else { return nil }
         var request = URLRequest(url: url)
@@ -94,29 +93,6 @@ enum SummaryClient {
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd"
         return fmt.string(from: date)
-    }
-
-    /// The menu bar reports this machine only; the dashboard is the consolidated
-    /// view. Rows carry their host, so filtering and re-summing needs no extra
-    /// request and still works from the offline cache.
-    static func scoped(_ summary: Summary, to host: String) -> Summary {
-        let wanted = host.lowercased()
-        let rows = summary.rows.filter { $0.host.lowercased() == wanted }
-        var todayByProvider: [String: Double] = [:]
-        var todayByHost: [String: Double] = [:]
-        for row in rows where row.day == summary.today {
-            todayByProvider[row.provider, default: 0] += row.spent
-            todayByHost[row.host, default: 0] += row.spent
-        }
-        return Summary(
-            generatedAt: summary.generatedAt,
-            today: summary.today,
-            days: summary.days,
-            rows: rows,
-            todayByProvider: todayByProvider,
-            todayByHost: todayByHost,
-            todayTotal: todayByProvider.values.reduce(0, +)
-        )
     }
 
     /// Daily totals, oldest first, keyed by provider type so the menu's rows and

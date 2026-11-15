@@ -14,8 +14,7 @@ enum PrintMode {
             let enabled = config.providers.filter(\.enabled)
             var summary: Summary?
             if let collector = config.collector {
-                summary = await SummaryClient.fetch(config: collector, host: Store.areaHost(config))
-                    .map { SummaryClient.scoped($0, to: Store.areaHost(config)) }
+                summary = await SummaryClient.fetch(config: collector)
             }
             var readings = await Providers.fetchAll(config.providers)
             readings = Providers.attachSpend(readings, enabled: enabled,

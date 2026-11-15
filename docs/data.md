@@ -32,9 +32,8 @@ tokens at that provider's rate, with reasoning tokens counted as output.
 ## Today and history in the menu
 
 The menu's today total and its 7- and 30-day bars come from the summary API,
-filtered to the host the menubar runs on. The dashboard is where hosts are
-combined. The response is cached; without a network the menu shows the last
-good numbers.
+so they cover every host, same as the dashboard. The response is cached;
+without a network the menu shows the last good numbers.
 
 ## Dashboard
 

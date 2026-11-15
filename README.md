@@ -28,9 +28,9 @@ instances of the same provider, so three OpenCode accounts are three rows,
 not one.
 
 The app does not scan logs. It fetches quota windows and credit balances from
-each provider, reads spend from the Worker's summary API filtered to this host,
-and keeps the last response on disk so an offline launch still shows numbers.
-The dashboard is the consolidated view across hosts. There is no
+each provider, reads spend from the Worker's summary API, and keeps the last
+response on disk so an offline launch still shows numbers. Both the menu and
+the dashboard show every host. There is no
 settings window; configuration is `~/.config/meter/config.json`.
 
 ```sh

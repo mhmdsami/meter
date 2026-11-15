@@ -44,7 +44,7 @@ final class Store: ObservableObject {
            let cached = try? JSONDecoder().decode([InstanceReading].self, from: data) {
             readings = cached
         }
-        if let summary = SummaryClient.cached().map({ SummaryClient.scoped($0, to: Self.areaHost(config)) }) {
+        if let summary = SummaryClient.cached() {
             latestSummary = summary
             history = Self.historyLines(SummaryClient.dailyByProvider(summary, days: 30))
             readings = Providers.attachSpend(readings, enabled: config.providers.filter(\.enabled),
@@ -178,7 +178,7 @@ final class Store: ObservableObject {
         async let fetched = Providers.fetchAll(due)
         async let summaryResult: Summary? = {
             guard summaryDue, let collector else { return nil }
-            return await SummaryClient.fetch(config: collector, host: Self.areaHost(self.config))
+            return await SummaryClient.fetch(config: collector)
         }()
         let fresh = await fetched
         let summary = await summaryResult
@@ -194,8 +194,7 @@ final class Store: ObservableObject {
         }
         readings = merged
 
-        if let fetched = summary {
-            let summary = SummaryClient.scoped(fetched, to: Self.areaHost(config))
+        if let summary {
             lastSummary = now
             latestSummary = summary
             history = Self.historyLines(SummaryClient.dailyByProvider(summary, days: 30))
@@ -209,13 +208,6 @@ final class Store: ObservableObject {
         lastRefresh = Date()
         let snapshot = readings
         Task.detached { Self.persist(snapshot) }
-    }
-
-    /// The host this menu bar reports. The collector may be pointed elsewhere for
-    /// push purposes, but the display is always the machine meter runs on.
-    nonisolated static func areaHost(_ config: Config) -> String {
-        let configured = config.collector?.host.trimmingCharacters(in: .whitespaces) ?? ""
-        return configured.isEmpty ? SummaryClient.hostName("") : configured
     }
 
     /// Which instances should fetch right now: force bypasses intervals but never

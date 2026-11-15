@@ -62,22 +62,6 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(out.filter { $0.type == "opencode" }.compactMap(\.spendToday).count, 1)
     }
 
-    func testScopedSummaryCountsOneHostOnly() {
-        let day = SummaryClient.dayString(Date())
-        let summary = Summary(
-            generatedAt: "", today: day, days: 30,
-            rows: [
-                SummaryRow(day: day, host: "mac", provider: "claude", spent: 2, tokens: 10),
-                SummaryRow(day: day, host: "space", provider: "claude", spent: 5, tokens: 20),
-            ],
-            todayByProvider: ["claude": 7], todayByHost: ["mac": 2, "space": 5], todayTotal: 7)
-        let scoped = SummaryClient.scoped(summary, to: "mac")
-        XCTAssertEqual(scoped.todayTotal, 2, accuracy: 0.0001)
-        XCTAssertEqual(scoped.rows.count, 1)
-        XCTAssertEqual(scoped.todayByHost["mac"] ?? 0, 2, accuracy: 0.0001)
-        XCTAssertNil(scoped.todayByHost["space"])
-    }
-
     func testFirstInstanceAlwaysClaimsTheTotal() {
         let enabled = [
             ProviderInstance(type: "opencode", name: "OpenCode a"),
