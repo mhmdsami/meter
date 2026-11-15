@@ -41,8 +41,8 @@ Copy `.dev.vars.example` to `.dev.vars`, fill the same values, then `npm run dev
   `(host, day, provider, project, model)` and each `(host, day, provider)`
   group is replaced atomically.
 - `GET /api/export?days=90&today=YYYY-MM-DD`: breakdown rows (session or `METER_READ_TOKEN`).
-- `GET /api/summary?days=30&today=YYYY-MM-DD&exclude_host=…`: daily aggregates
-  and today totals. `exclude_host` keeps the menubar from counting its own rows.
+- `GET /api/summary?days=30&today=YYYY-MM-DD&host=…|exclude_host=…`: daily
+  aggregates and today totals, optionally limited to or excluding one host.
 - `GET /api/health`.
 
 The dashboard is Google-gated. Reads accept the better-auth session cookie or

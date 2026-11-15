@@ -27,7 +27,11 @@ struct Config {
 /// are pushed; one full push a day still reconciles pruned or edited logs.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
 struct PushState {
-    full_pushed_ms: i64,
+    /// Local date of the last complete push; a different date means one is due,
+    /// so the reconcile lands just after midnight rather than at a rolling time.
+    #[serde(default)]
+    full_day: String,
+    #[serde(default)]
     days: BTreeMap<String, u64>,
 }
 
@@ -190,9 +194,10 @@ fn main() {
         by_day.entry(row.day.clone()).or_default().push(row.clone());
     }
     let mut state = load_state();
-    let full_every_ms = 24 * 3_600_000;
+    let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
+    let today_local = now.to_offset(offset).date().to_string();
     let force_full = std::env::args().any(|a| a == "--full");
-    let full_due = force_full || now_ms - state.full_pushed_ms >= full_every_ms;
+    let full_due = force_full || state.full_day != today_local;
     let mut selected: Vec<String> = Vec::new();
     for (day, day_rows) in &by_day {
         let hash = day_hash(day_rows);
@@ -267,7 +272,7 @@ fn main() {
         Ok(output) if output.status.success() => {
             println!("{}", String::from_utf8_lossy(&output.stdout).trim());
             if full_due {
-                state.full_pushed_ms = now_ms;
+                state.full_day = today_local.clone();
             }
             for day in &selected {
                 if let Some(day_rows) = by_day.get(day) {

@@ -14,15 +14,18 @@ export async function GET(request: Request) {
   since.setUTCDate(since.getUTCDate() - (days - 1));
   const start = since.toISOString().slice(0, 10);
   const excludeHost = url.searchParams.get("exclude_host");
+  const onlyHost = url.searchParams.get("host");
+  const hostFilter = excludeHost ? " AND host != ?" : onlyHost ? " AND host = ?" : "";
+  const hostValue = excludeHost ?? onlyHost;
 
   const rows: { day: string; host: string; provider: string; spent: number; tokens: number }[] = [];
-  const binds = excludeHost ? [start, today, excludeHost] : [start, today];
+  const binds = hostValue ? [start, today, hostValue] : [start, today];
   for (let offset = 0; ; offset += 500) {
     const { results } = await env()
       .DB.prepare(
         `SELECT day, host, provider, SUM(spent) AS spent, SUM(tokens) AS tokens
          FROM usage_rows
-         WHERE day >= ? AND day <= ?${excludeHost ? " AND host != ?" : ""}
+         WHERE day >= ? AND day <= ?${hostFilter}
          GROUP BY day, host, provider
          ORDER BY day, host, provider
          LIMIT ? OFFSET ?`,

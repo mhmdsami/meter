@@ -178,7 +178,7 @@ final class Store: ObservableObject {
         async let fetched = Providers.fetchAll(due)
         async let summaryResult: Summary? = {
             guard summaryDue, let collector else { return nil }
-            return await SummaryClient.fetch(config: collector)
+            return await SummaryClient.fetch(config: collector, host: Self.areaHost(self.config))
         }()
         let fresh = await fetched
         let summary = await summaryResult

@@ -70,7 +70,7 @@ enum SummaryClient {
 
     /// Every host's usage, including this one: the collector pushes it, so the
     /// app never filters itself out.
-    static func fetch(config: CollectorConfig) async -> Summary? {
+    static func fetch(config: CollectorConfig, host: String) async -> Summary? {
         guard config.enabled, !config.url.isEmpty, let base = URL(string: config.url),
               let token = token() else { return nil }
         var components = URLComponents(url: base.appendingPathComponent("api/summary"),
@@ -78,6 +78,7 @@ enum SummaryClient {
         components?.queryItems = [
             URLQueryItem(name: "days", value: "30"),
             URLQueryItem(name: "today", value: dayString(Date())),
+            URLQueryItem(name: "host", value: host),
         ]
         guard let url = components?.url else { return nil }
         var request = URLRequest(url: url)
