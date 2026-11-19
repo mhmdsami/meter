@@ -36,6 +36,148 @@ struct Generation {
 }
 
 /// `pending` and final lines share an id, so keep the most complete one.
+/// fx keeps cumulative token snapshots in its v2 session logs, so Grok usage
+/// does not appear in `usage.jsonl` (that file only holds gateway-billed
+/// generations). Each `set usage` is a running total; the delta between two
+/// snapshots is what one turn cost.
+pub fn v2_sessions(host: &str, root: &Path, since_ms: i64, pricing: &Pricing) -> Vec<Row> {
+    let mut workspaces: HashMap<String, String> = HashMap::new();
+    if let Ok(handle) = fs::File::open(root.join("index.jsonl")) {
+        for line in BufReader::new(handle).lines().map_while(Result::ok) {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            if value.get("op").and_then(|v| v.as_str()) != Some("put") {
+                continue;
+            }
+            let (Some(id), Some(workspace)) = (
+                value.get("id").and_then(|v| v.as_str()),
+                value.get("workspace").and_then(|v| v.as_str()),
+            ) else {
+                continue;
+            };
+            workspaces
+                .entry(id.to_string())
+                .or_insert_with(|| workspace.to_string());
+        }
+    }
+
+    let mut rows = Vec::new();
+    let Ok(entries) = fs::read_dir(root) else {
+        return rows;
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Some(id) = dir.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Ok(handle) = fs::File::open(dir.join("log.jsonl")) else {
+            continue;
+        };
+        let project = workspaces.get(id).cloned().unwrap_or_default();
+        let mut model: Option<String> = None;
+        let mut provider: Option<String> = None;
+        let mut last = (0i64, 0i64, 0i64, 0i64, 0i64);
+
+        for line in BufReader::new(handle).lines().map_while(Result::ok) {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            if value.get("kind").and_then(|v| v.as_str()) != Some("set") {
+                continue;
+            }
+            let Some(key) = value.get("key").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(payload) = value.get("value") else {
+                continue;
+            };
+            match key {
+                "prefs" => {
+                    provider = payload
+                        .get("provider")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                    model = payload
+                        .get("model")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                }
+                "usage" => {
+                    let field =
+                        |name: &str| payload.get(name).and_then(|v| v.as_i64()).unwrap_or(0);
+                    let now = (
+                        field("input_tokens"),
+                        field("output_tokens"),
+                        field("cache_read_tokens"),
+                        field("cache_write_tokens"),
+                        field("reasoning_tokens"),
+                    );
+                    let delta = (
+                        (now.0 - last.0).max(0),
+                        (now.1 - last.1).max(0),
+                        (now.2 - last.2).max(0),
+                        (now.3 - last.3).max(0),
+                        (now.4 - last.4).max(0),
+                    );
+                    last = now;
+                    if provider.as_deref() != Some("grok") {
+                        continue;
+                    }
+                    let Some(model_name) = model.as_deref() else {
+                        continue;
+                    };
+                    let Some(ts) = value.get("ts").and_then(|v| v.as_i64()) else {
+                        continue;
+                    };
+                    if ts < since_ms {
+                        continue;
+                    }
+                    let Some(day) = local_day_ms(ts) else {
+                        continue;
+                    };
+                    let Some(cost) = pricing.cost(model_name, None) else {
+                        continue;
+                    };
+                    let spent = pricing.claude(
+                        cost,
+                        delta.0 as f64,
+                        delta.2 as f64,
+                        delta.3 as f64,
+                        (delta.1 + delta.4) as f64,
+                    );
+                    let tokens = delta.0 + delta.1 + delta.2 + delta.3 + delta.4;
+                    if spent <= 0.004 && tokens == 0 {
+                        continue;
+                    }
+                    rows.push(Row {
+                        host: host.to_string(),
+                        day,
+                        provider: "grok".to_string(),
+                        project: project.clone(),
+                        model: model_name.to_string(),
+                        spent,
+                        tokens,
+                        source: "estimated".to_string(),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+    rows
+}
+
+fn local_day_ms(ms: i64) -> Option<String> {
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    OffsetDateTime::from_unix_timestamp_nanos(ms as i128 * 1_000_000)
+        .ok()
+        .map(|time| time.to_offset(offset).date().to_string())
+}
+
 fn generations(path: &Path) -> Vec<Generation> {
     let Ok(handle) = fs::File::open(path) else {
         return Vec::new();

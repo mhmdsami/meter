@@ -174,6 +174,12 @@ fn main() {
         &pricing,
     ));
     rows.extend(fx::rows(&config.host, &fx_path, &since_day, &pricing));
+    rows.extend(fx::v2_sessions(
+        &config.host,
+        &home().join(".fx/sessions/v2"),
+        since_ms,
+        &pricing,
+    ));
     rows.extend(antigravity::scan(
         &config.host,
         &antigravity_root,

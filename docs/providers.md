@@ -13,7 +13,7 @@ like; every instance gets its own row.
 | `amp` | free-tier meter, subscription pools, credit balance, today's recorded cost | `amp` CLI login or API key |
 | `zed` | edit-prediction usage, billing cycle | Zed's keychain login |
 | `vercel` | paid AI Gateway spend from the `fx` log | `~/.fx/usage.jsonl` |
-| `grok` | weekly shared pool for Grok, Grok Bot, and Cursor, plus prepaid credit | the Grok CLI login in `~/.grok/auth.json` |
+| `grok` | weekly shared pool for Grok, Grok Bot, and Cursor, plus prepaid credit; today's spend from fx sessions priced at xAI list rates | the Grok CLI login in `~/.grok/auth.json` |
 | `straitly` | key balance (`/v1/key`) | API key |
 | `cloudflare` | requests, tokens, errors, billed cost, credit balance | API token plus account/gateway ids |
 | `other` | catch-all for providers without a dedicated row | none |
