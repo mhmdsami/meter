@@ -1,3 +1,4 @@
+mod amp;
 mod antigravity;
 mod codex;
 mod fx;
@@ -164,6 +165,12 @@ fn main() {
         &config.host,
         &claude_roots,
         since_ms,
+        &pricing,
+    ));
+    rows.extend(amp::rows(
+        &config.host,
+        &home().join(".cache/meter/amp-days.json"),
+        config.days,
         &pricing,
     ));
     rows.extend(codex::scan(

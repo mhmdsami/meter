@@ -49,6 +49,8 @@ The scans cover:
   (`~/.gemini/antigravity-cli`), where token usage and the model per turn are
   recorded.
 - The `fx` AI Gateway usage log.
+- `amp usage`, which is the only record of Amp CLI and orb tokens: Amp serves
+  every request itself, so neither slice reaches the local Claude logs.
 
 Attribution:
 
@@ -61,6 +63,10 @@ Attribution:
   currently holds. Since opencode 2.2 the message rows carry tokens but no
   per-message cost, so those rows are priced from tokens at the provider's
   published rate and marked estimated.
+- Amp reports its models by display name. They are matched to the vendor's
+  list rate (`claude-opus-5-5` for "Opus 5.5") and billed as Claude spend, which
+  covers both the Amp-billed and the subscription-routed requests; the report
+  records no cost for the latter even though the tokens are real.
 - Rows whose source is the provider's own billing (`vercel`) are marked
   `reported`; everything else is `estimated`.
 

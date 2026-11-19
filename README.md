@@ -54,7 +54,8 @@ SwiftUI and SwiftPM, no third-party dependencies, macOS 14 or later.
 
 Rust, no C toolchain required: SQLite reads use `python3`, HTTP uses `curl`.
 Scans Codex rollouts, Claude Code (including the Desktop stores), opencode,
-pi/OMP, the Antigravity CLI, and the fx gateway log, then pushes to the API.
+pi/OMP, the Antigravity CLI, the fx gateway log, and Amp usage, then pushes to
+the API.
 Runs on macOS, Linux, and Windows where those tools and `python3` exist.
 
 ```sh

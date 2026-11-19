@@ -134,6 +134,35 @@ impl Pricing {
         }
     }
 
+    #[cfg(test)]
+    pub fn with_rates(entries: &[(&str, &str, Cost)]) -> Pricing {
+        let mut pricing = Pricing {
+            models: HashMap::new(),
+            by_provider: HashMap::new(),
+        };
+        for (provider, model, cost) in entries {
+            pricing
+                .by_provider
+                .entry(provider.to_lowercase())
+                .or_default()
+                .insert(model.to_lowercase(), *cost);
+            pricing.models.insert(model.to_lowercase(), *cost);
+        }
+        pricing
+    }
+
+    /// Vendor list rates only, so a reseller mirror of the same model id can't
+    /// stand in for the published price.
+    pub fn official(&self, model: &str) -> Option<Cost> {
+        let base = model.to_lowercase();
+        OFFICIAL.iter().find_map(|provider| {
+            self.by_provider
+                .get(*provider)
+                .and_then(|models| models.get(&base))
+                .copied()
+        })
+    }
+
     pub fn cost(&self, model: &str, provider: Option<&str>) -> Option<Cost> {
         let base = model.to_lowercase();
         if let Some(provider) = provider {
